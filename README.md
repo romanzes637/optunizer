@@ -7,7 +7,29 @@ pip install optunizer
 ```
 
 ## Running
-1. Make config file, e.g. `optunizer.yaml`
+0. Suppose you have some script/program (e.g. `main.py`) with config in YAML/JSON file (e.g. `config.yaml`) that returns some output (e.g. `metrics.json`)
+* main.py
+```python
+# Read config.yaml
+...
+# Do some stuff
+...
+# Write metrics.json
+...
+```
+* config.yaml
+```yaml
+param1: 2
+param2: 0.5
+param3: c
+```
+* metrics.json
+```json
+{
+  "metric": 0.3
+}
+```
+1. Make optunizer config file, e.g. `optunizer.yaml`
 ```yaml
 attrs:  # track all fields in files
   config.yaml: true
