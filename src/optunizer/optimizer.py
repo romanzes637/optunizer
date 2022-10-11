@@ -387,4 +387,6 @@ class Optimizer:
       study = optuna.load_study(storage=self.url, study_name=self.study)
     if self.export_csv is not None:
       df = study.trials_dataframe()
+      p = Path(self.export_csv)
+      p.parent.mkdir(parents=True, exist_ok=True)
       df.to_csv(self.export_csv, index=False)

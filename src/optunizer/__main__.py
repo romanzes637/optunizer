@@ -1,4 +1,5 @@
 import os
+import sys
 
 from dotenv import load_dotenv, dotenv_values
 import yaml
@@ -8,7 +9,10 @@ from optunizer.factory import factory
 
 if __name__ == '__main__':
   load_dotenv()  # load '.env' file
-  c = os.getenv('OPTUNA_CONFIG', 'optunizer.yaml')
+  if len(sys.argv) > 1:
+    c = sys.argv[1]
+  else:
+    c = os.getenv('OPTUNA_CONFIG', 'optunizer.yaml')
   with open(c) as f:
     kwargs = yaml.safe_load(f)
   s = os.getenv('OPTUNA_SECRET', '.env.secret')
