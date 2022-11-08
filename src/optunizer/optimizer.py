@@ -28,7 +28,7 @@ class Optimizer:
     export_metrics=None, export_sysinfo=None,
     sampler=None, sampler_kwargs=None, pruner=None, pruner_kwargs=None,
     subprocess_kwargs=None, stdout_kwargs=None, stderr_kwargs=None,
-    params=None, objectives=None, attrs=None, lsep=None, gsep=None, secret=None):
+    params=None, objectives=None, attrs=None, lsep=None, gsep=None, secret=None, verbose=None):
     url = os.getenv('OPTUNA_URL') if url is None else url
     url = secret.get('optuna_url') if url is None else url
     self.url = url
@@ -78,6 +78,9 @@ class Optimizer:
     self.attrs = {} if attrs is None else attrs
     self.lsep = '/' if lsep is None else lsep
     self.gsep = '@' if gsep is None else gsep
+    if verbose is None:
+      verbose = int(os.getenv('OPTUNA_VERBOSE', 0))
+    self.verbose = verbose
 
   @staticmethod
   def initialize_sampler(sampler, sampler_kwargs):
@@ -346,7 +349,8 @@ class Optimizer:
           if k.startswith(local_path):
             attrs[self.gsep.join([k, global_path])] = v
     print(f'Attributes: {len(attrs)}')
-    pprint(attrs)
+    if self.verbose:
+      pprint(attrs)
     for k, v in attrs.items():
       trial.set_user_attr(k, v)
   
