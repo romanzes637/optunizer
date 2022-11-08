@@ -67,6 +67,12 @@ class Optimizer:
     self.subprocess_kwargs = {} if subprocess_kwargs is None else subprocess_kwargs
     self.stdout_kwargs = {} if stdout_kwargs is None else stdout_kwargs
     self.stderr_kwargs = {} if stderr_kwargs is None else stderr_kwargs
+    if not isinstance(self.subprocess_kwargs, list):
+      self.subprocess_kwargs = [self.subprocess_kwargs]
+    if not isinstance(self.stdout_kwargs, list):
+      self.stdout_kwargs = [self.stdout_kwargs for _ in self.subprocess_kwargs]
+    if not isinstance(self.stderr_kwargs, list):
+      self.stderr_kwargs = [self.stderr_kwargs for _ in self.subprocess_kwargs]
     self.params = {} if params is None else params
     self.objectives = {} if objectives is None else objectives
     self.attrs = {} if attrs is None else attrs
@@ -288,26 +294,32 @@ class Optimizer:
   
   def subprocess(self):
     subprocess_kwargs = copy.deepcopy(self.subprocess_kwargs)
-    stdout = self.subprocess_kwargs.get('stdout', None)
-    if stdout is not None:
-      if stdout in ['PIPE', 'STDOUT', 'DEVNULL']:
-        stdout = getattr(subprocess, stdout)
-      else:  # FILE
-        stdout = open(file=stdout, **self.stdout_kwargs)
-      subprocess_kwargs['stdout'] = stdout
-    stderr = subprocess_kwargs.get('stderr', None)
-    if stderr is not None:
-      if stderr in ['PIPE', 'STDOUT', 'DEVNULL']:
-        stderr = getattr(subprocess, stderr)
-      else:  # FILE
-        stderr = open(file=stderr, **self.stderr_kwargs)
-      subprocess_kwargs['stderr'] = stderr
-    result = subprocess.run(**subprocess_kwargs)
-    if isinstance(stdout, io.IOBase) and not stdout.closed:
-      stdout.close()
-    if isinstance(stderr, io.IOBase) and not stderr.closed:
-      stderr.close()
-    return result
+    stdout_kwargs = copy.deepcopy(self.stdout_kwargs)
+    stderr_kwargs = copy.deepcopy(self.stderr_kwargs)
+    results = []
+    for sub_kws, out_kws, err_kws in zip(
+      subprocess_kwargs, stdout_kwargs, stderr_kwargs):
+      stdout = sub_kws.get('stdout', None)
+      if stdout is not None:
+        if stdout in ['PIPE', 'STDOUT', 'DEVNULL']:
+          stdout = getattr(subprocess, stdout)
+        else:  # FILE
+          stdout = open(file=stdout, **out_kws)
+        sub_kws['stdout'] = stdout
+      stderr = sub_kws.get('stderr', None)
+      if stderr is not None:
+        if stderr in ['PIPE', 'STDOUT', 'DEVNULL']:
+          stderr = getattr(subprocess, stderr)
+        else:  # FILE
+          stderr = open(file=stderr, **err_kws)
+        sub_kws['stderr'] = stderr
+      result = subprocess.run(**sub_kws)
+      if isinstance(stdout, io.IOBase) and not stdout.closed:
+        stdout.close()
+      if isinstance(stderr, io.IOBase) and not stderr.closed:
+        stderr.close()
+      results.append(result)
+    return results
   
   def set_params(self, trial):
     for path, kwargs in self.params.items():
@@ -352,7 +364,7 @@ class Optimizer:
   def objective(self, trial):
     self.set_params(trial)
     r = self.subprocess()
-    if r.returncode == 0:
+    if all([x.returncode == 0 for x in r]):
       self.set_attrs(trial)
       return self.get_objectives(trial)
     else:
