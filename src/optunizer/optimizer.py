@@ -255,7 +255,8 @@ class Optimizer:
            'processor': platform.processor(),
            'hostname': socket.gethostname(),
            'fqdn': socket.getfqdn(),
-           'ip': Optimizer.Logger.get_ip()}
+           'ip': Optimizer.Logger.get_ip(),
+           'cwd': os.getcwd()}
       return d
     
     @staticmethod
