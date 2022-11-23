@@ -8,7 +8,7 @@ from optunizer.factory import factory
 
 
 if __name__ == '__main__':
-  load_dotenv()  # load '.env' file
+  load_dotenv('.env')
   if len(sys.argv) > 1:
     c = sys.argv[1]
   else:
