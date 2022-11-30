@@ -1,23 +1,21 @@
 import os
+from pathlib import Path
 import sys
 
-from dotenv import load_dotenv, dotenv_values
-import yaml
-
-from optunizer.factory import factory
+from optunizer.factory import factory, parse_config
 
 
 if __name__ == '__main__':
-  load_dotenv('.env')
   if len(sys.argv) > 1:
     c = sys.argv[1]
   else:
-    c = os.getenv('OPTUNA_CONFIG', 'optunizer.yaml')
-  with open(c) as f:
-    kwargs = yaml.safe_load(f)
-  s = os.getenv('OPTUNA_SECRET', '.env.secret')
-  s = dotenv_values(s)
-  s = {k.lower(): v for k, v in s.items()}
-  kwargs['secret'] = s
-  c, kwargs = factory(kwargs)
-  c(**kwargs)
+    c = os.getenv('OPTUNA_CONFIG', None)
+  if c is not None and c == 'app':
+    sys.argv[1] = str(Path(__file__).resolve().parent / 'app.py')
+    cmd = f"streamlit run {' '.join(sys.argv[1:])}"
+    print(cmd)
+    os.system(cmd)
+  else:
+    kwargs = parse_config(c)
+    c, kwargs = factory(kwargs)
+    c(**kwargs)

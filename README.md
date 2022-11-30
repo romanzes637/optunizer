@@ -5,24 +5,34 @@ Optuna extension for JSON and YAML configuration files
 ```sh
 pip install optunizer
 ```
+* with PostresSQL connector
+```sh
+pip install optunizer[psycopg]
+```
 
 ## Running
 0. Suppose you have some script/program (e.g. `main.py`) with config in YAML/JSON file (e.g. `config.yaml`) that returns some output (e.g. `metrics.json`)
 * main.py
 ```python
-# Read config.yaml
-...
-# Do some stuff
-...
-# Write metrics.json
-...
+import json
+import yaml
+config_file = 'config.yaml'
+with open(config_file) as f:
+  params = yaml.safe_load(f)
+metric = params['param1'] + params['param2']
+metrics = {'metric': metric}
+metrics_file = 'metrics.json'
+with open(metrics_file, 'w') as f:
+  json.dump(metrics, f)
 ```
+
 * config.yaml
 ```yaml
 param1: 2
 param2: 0.5
 param3: c
 ```
+
 * metrics.json
 ```json
 {
@@ -30,6 +40,7 @@ param3: c
 }
 ```
 1. Make optunizer config file, e.g. `optunizer.yaml`
+
 ```yaml
 attrs:  # track all fields in files
   config.yaml: true
@@ -67,13 +78,13 @@ pruner_kwargs:  # Specify pruner, e.g. PatientPruner with NopPruner subpruner
   wrapped_pruner_kwargs: {}
 sampler: PartialFixedSampler
 sampler_kwargs:   # Specify sampler, e.g. PartialFixedSampler with GridSampler subsampler
-  # base_sampler: RandomSampler
-  # base_sampler_kwargs: {}
-  base_sampler: GridSampler
-  base_sampler_kwargs:
-    search_space:
-      param1@config.yaml: [0, 1, 2]
-      param2@config.yaml: [0.01, 0.5]
+  base_sampler: RandomSampler
+  base_sampler_kwargs: {}
+  # base_sampler: GridSampler
+  # base_sampler_kwargs:
+  #   search_space:
+  #     param1@config.yaml: [0, 1, 2]
+  #     param2@config.yaml: [0.01, 0.5]
   fixed_params:
     param3@config.yaml: a
 subprocess_kwargs:  # Specify your command
@@ -87,10 +98,22 @@ subprocess_kwargs:  # Specify your command
 ```sh
 OPTUNA_CONFIG=optunizer.yaml python -m optunizer
 ```
+or
+```sh
+python -m optunizer optunizer.yaml
+```
 
-3. There are several useful environment variables, that could be set in command line, `.env` or `.env.secret` files
+3. Run optunizer streamlit viz
+```sh
+pip install optunizer[viz]
+python -m optunizer app
+```
+
+4. There are several useful environment variables, that could be set in command line, `.env` or `.env.secret` files
 ```sh
 OPTUNA_CONFIG=optunizer.yaml
+OPTUNA_CONFIG_APP=app.yaml
+OPTUNA_SHARED=.env
 OPTUNA_SECRET=.env.secret
 OPTUNA_URL=postgresql+psycopg2://USER:PASSWORD@IP:PORT/DB  # see https://docs.sqlalchemy.org/en/14/core/engines.html
 OPTUNA_STUDY=STUDY_NAME

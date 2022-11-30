@@ -1,5 +1,38 @@
+import os
 import importlib
 import inspect
+
+from dotenv import load_dotenv, dotenv_values
+import yaml
+
+
+def parse_string(s):
+  if s is not None:
+    if s.isnumeric():
+      s = int(s)
+    else:
+      try:
+        s = float(s)
+      except ValueError:
+        pass
+  return s
+
+
+def parse_config(config):
+  if config is not None:
+    with open(config) as f:
+      kwargs = yaml.safe_load(f)
+  else:
+    kwargs = {}
+  env_kwargs = {
+    **dotenv_values(os.getenv('OPTUNA_SHARED', '.env')),  # load shared development variables
+    **dotenv_values(os.getenv('OPTUNA_SECRET', '.env.secret')),  # load sensitive variables
+    **os.environ,  # override loaded values with environment variables
+  }
+  env_kwargs = {k.lower()[7:]: parse_string(v) for k, v in env_kwargs.items() 
+                if k.startswith('OPTUNA_')}
+  kwargs = {**kwargs, **env_kwargs}
+  return kwargs
 
 
 def factory(kwargs):

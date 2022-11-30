@@ -23,42 +23,21 @@ import optuna
 
 class Optimizer:
   def __init__(
-    self, url=None, study=None, n_trials=None, timeout=None,
-    load_if_exists=None, export_csv=None, results_only=None, 
+    self, url=None, study=None, trials=None, timeout=None,
+    load_if_exists=True, export_csv=None, results_only=False, 
     export_metrics=None, export_sysinfo=None,
     sampler=None, sampler_kwargs=None, pruner=None, pruner_kwargs=None,
     subprocess_kwargs=None, stdout_kwargs=None, stderr_kwargs=None,
-    params=None, objectives=None, attrs=None, lsep=None, gsep=None, secret=None, verbose=None):
-    url = os.getenv('OPTUNA_URL') if url is None else url
-    url = secret.get('optuna_url') if url is None else url
+    params=None, objectives=None, attrs=None, lsep=None, gsep=None,
+    verbose=False, **kwargs):
     self.url = url
-    self.study = os.getenv('OPTUNA_STUDY') if study is None else study
-    if n_trials is None:
-      n_trials = os.getenv('OPTUNA_TRIALS', '')
-      n_trials = int(n_trials) if n_trials.strip() else None
-    self.n_trials = n_trials
-    if timeout is None:
-      timeout = os.getenv('OPTUNA_TIMEOUT', '')
-      timeout = int(timeout) if timeout.strip() else None
+    self.study = study
+    self.trials = trials
     self.timeout = timeout
-    if load_if_exists is None:
-      load_if_exists = int(os.getenv('OPTUNA_LOAD_IF_EXISTS', 0))
     self.load_if_exists = load_if_exists
-    if export_csv is None:
-      export_csv = os.getenv('OPTUNA_EXPORT_CSV', '')
-      export_csv = export_csv if export_csv.strip() else None
     self.export_csv = export_csv
-    if results_only is None:
-      results_only = int(os.getenv('OPTUNA_RESULTS_ONLY', 0))
     self.results_only = results_only
-    if export_metrics is None:
-      export_metrics = os.getenv('OPTUNA_EXPORT_METRICS', '')
-      export_metrics = int(export_metrics) if export_metrics.strip() else None
     self.export_metrics = export_metrics
-    if export_sysinfo is None:
-      export_sysinfo = os.getenv('OPTUNA_EXPORT_SYSINFO', '')
-      export_sysinfo = int(export_sysinfo) if export_sysinfo.strip() else None
-    self.export_sysinfo = export_sysinfo
     self.export_sysinfo = export_sysinfo
     self.sampler = sampler
     self.sampler_kwargs = sampler_kwargs
@@ -78,8 +57,6 @@ class Optimizer:
     self.attrs = {} if attrs is None else attrs
     self.lsep = '/' if lsep is None else lsep
     self.gsep = '@' if gsep is None else gsep
-    if verbose is None:
-      verbose = int(os.getenv('OPTUNA_VERBOSE', 0))
     self.verbose = verbose
 
   @staticmethod
@@ -373,6 +350,8 @@ class Optimizer:
       self.set_attrs(trial)
       return self.get_objectives(trial)
     else:
+      print('Errors in pipeline!')
+      pprint(r)
       return None
 
   def __call__(self):
@@ -398,7 +377,7 @@ class Optimizer:
       callbacks = [Optimizer.Logger(export_metrics=self.export_metrics,
                                     export_sysinfo=None)]
       # Optimize
-      study.optimize(self.objective, n_trials=self.n_trials, timeout=self.timeout,
+      study.optimize(self.objective, n_trials=self.trials, timeout=self.timeout,
                      callbacks=callbacks)
     else:
       study = optuna.load_study(storage=self.url, study_name=self.study)
