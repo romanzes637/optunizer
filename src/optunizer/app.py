@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import sys
 import json
+import io
 
 from matplotlib.tri import Triangulation, UniformTriRefiner, LinearTriInterpolator, CubicTriInterpolator
 import numpy as np
@@ -21,7 +22,7 @@ def main(**kwargs):
   url, study_name = None, None
   df = st.session_state['df'] if 'df' in st.session_state else None
   df2 = st.session_state['df2'] if 'df2' in st.session_state else None
-  df3 = st.session_state['df3'] if 'df3' in st.session_state else None
+  fig_contour = st.session_state['fig_contour'] if 'fig_contour' in st.session_state else None
   with st.sidebar:
     with st.expander('Data options'):
       with st.form(key='storage_params'):
@@ -51,68 +52,74 @@ def main(**kwargs):
       'Table', 'Scatter', 'Correlation', 'Contour'])
     with st.sidebar:
       with st.expander('Transforms'):
-        n_transforms = st.number_input('Number of transforms', min_value=0, max_value=None, value=0, step=1)
-        with st.form(key='transforms_params'):
+        transforms_names = ['pandas', 'scale', 'post_pandas', 'filter']
+        n_transforms = {}
+        for t in transforms_names:
+          n_transforms[t] = st.number_input(f'Number of {t}', min_value=0, max_value=None, value=0, step=1)
+        with st.form(key='transforms'):
           transforms = []
-          for i in range(n_transforms):
-            st.header(f'Transform {i+1}')
-            is_other = st.checkbox('Add other', value=True, key=f'transform_add_other_{i+1}')
-            transform_name = st.text_input(f'Name', key=f'transform_name_{i+1}')
-            transform_base = st.selectbox(f'Base', df.columns, key=f'transform_base_{i+1}')
-            transform_axis = st.selectbox(f'Axis', ['index', 'columns'], key=f'transform_axis_{i+1}')
-            transform_other = st.text_input('Other', key=f'transform_other_{i+1}') if is_other else None
-            transform_new = st.text_input('New', key=f'transform_new_{i+1}')
-            transforms.append([transform_name, transform_base, transform_axis, transform_other, transform_new])
+          for name, number in n_transforms.items():
+            for i in range(number):
+              st.header(f'{name} {i+1}')
+              if name in ['pandas', 'post_pandas']:
+                if name == 'pandas':
+                  base = st.selectbox('Base', df.columns, key=f'{name}_base_{i+1}')
+                elif name == 'post_pandas':
+                  base = st.text_input('Base', key=f'{name}_base_{i+1}')
+                transform_kwargs = {
+                  'func': st.text_input('Function', key=f'{name}_function_{i+1}'),
+                  'base': base,
+                  'new': st.text_input('New', key=f'{name}_new_{i+1}'),
+                  'axis': st.selectbox('Axis', [None, 'rows', 'columns'], key=f'{name}_axis_{i+1}'),
+                  'other': st.text_input('Other', key=f'{name}_other_{i+1}')}
+              elif name == 'scale':
+                transform_kwargs = {
+                  'base': st.text_input('Base', key=f'{name}_base_{i+1}'),
+                  'new': st.text_input('New', key=f'{name}_new_{i+1}'),
+                  'initial': st.text_input('Initial', key=f'{name}_initial_{i+1}'),
+                  'coefficient': st.text_input('Coefficient', key=f'{name}_coefficient_{i+1}')}
+              elif name == 'filter':
+                transform_kwargs = {
+                  'func': st.selectbox('Function', ['ge', 'eq', 'lt', 'le', 'ne'], key=f'{name}_function_{i+1}'),
+                  'base': st.selectbox('Base', df.columns, key=f'{name}_base_{i+1}'),
+                  'other': st.text_input('Other', key=f'{name}_other_{i+1}')}
+              else:
+                raise NotImplemetedError(name)
+              transform_kwargs = {k: v for k, v in transform_kwargs.items() 
+                                  if v is not None and v != ''}
+              for k, v in transform_kwargs.items():
+                try:
+                  transform_kwargs[k] = float(v)
+                except:
+                  pass
+              transforms.append([name, transform_kwargs])
           transform_button = st.form_submit_button(label='Transform')
           if transform_button:
             df2 = df.copy(deep=True)
             n_rows, n_cols = len(df), len(df.columns)
-            for transform_name, transform_base, transform_axis, transform_other, transform_new in transforms:
-              if transform_other is not None:
-                if transform_other in df2:
-                  transform_other = df2[transform_other]
-                else:
-                  others = []
-                  for token in transform_other.split():
-                    try:
-                      token = float(token)
-                    except:
-                      pass
-                    others.append(token)
-                if transform_name in globals():
-                  transform_function = globals()[transform_name]
-                  new_dfs = transform_function(df2, *others)
-                  df2 = pd.concat([df2] + new_dfs, axis=1)
-                else:
-                  df2[transform_new] = df2[transform_base].transform(transform_name, transform_axis, *others)
+            for transform_name, transform_kwargs in transforms:
+              print(transform_name, transform_kwargs)
+              if transform_name in globals():
+                transform_function = globals()[transform_name]
+                new_dfs = transform_function(df2, **transform_kwargs)
+                df2 = pd.concat([df2] + new_dfs, axis=1)
+              elif transform_name in ['pandas', 'post_pandas']:
+                base = transform_kwargs.pop('base')
+                new = transform_kwargs.pop('new')
+                if 'other' in transform_kwargs:
+                  if isinstance(transform_kwargs['other'], str):
+                    transform_kwargs['other'] = df2[transform_kwargs['other']]
+                df2[new] = df2[base].transform(**transform_kwargs)
+              elif transform_name == 'filter':
+                func = transform_kwargs.pop('func')
+                base = transform_kwargs.pop('base')
+                mask = getattr(df2[base], func)(**transform_kwargs)
+                df2 = df2[mask]
               else:
-                  df2[transform_new] = df2.transform(transform_name, transform_axis)
+                raise NotImplemetedError(name)
             st.session_state['df2'] = df2
             st.success(f'OK, ROWS: {n_rows}->{len(df2)}, COLS: {n_cols}->{len(df2.columns)}')
-      df22 = df2 if df2 is not None else df      
-      with st.expander('Filters'):
-        n_filters = st.number_input('Number of filters', min_value=0, max_value=None, value=0, step=1)
-        with st.form(key='fliters_params'):
-          filters = []
-          for i in range(n_filters):
-            with st.container():
-              st.header(f'Filter {i+1}')
-              filter_name = st.selectbox(f'Name', ['ge', 'eq', 'lt', 'le', 'ne'], key=f'filter_name_{i+1}')
-              filter_base = st.selectbox(f'Base', df22.columns, key=f'filter_base_{i+1}')
-              filter_other = st.number_input('Other', key=f'filter_other_{i+1}')
-              filters.append([filter_name, filter_base, filter_other])
-          filter_button = st.form_submit_button(label='Filter')
-          if filter_button:
-            df3 = df2.copy(deep=True) if df2 is not None else df.copy(deep=True)
-            n_rows, n_cols = len(df3), len(df3.columns)
-            for filter_name, filter_base, filter_other in filters:
-              mask = getattr(df3[filter_base], filter_name)(other=filter_other)
-              df3 = df3[mask]
-            st.session_state['df3'] = df3
-            st.success(f'OK, ROWS: {n_rows}->{len(df3)}, COLS: {n_cols}->{len(df3.columns)}')
-      if df3 is not None:
-        df4 = df3
-      elif df2 is not None:
+      if df2 is not None:
         df4 = df2
       else:
         df4 = df
@@ -131,6 +138,8 @@ def main(**kwargs):
           continuous_color += '_r'
         is_x_log = st.checkbox('Log X', value=False)
         is_y_log = st.checkbox('Log Y', value=False)
+        is_x_grid = st.checkbox('Grid X', value=False)
+        is_y_grid = st.checkbox('Grid Y', value=False)
         is_y2_log = st.checkbox('Log Y2', value=False)
         x_title = st.text_input('Title X')
         y_title = st.text_input('Title Y')
@@ -148,6 +157,8 @@ def main(**kwargs):
           layout.setdefault('xaxis', {}).setdefault('type', 'log')
         if is_y_log:  
           layout.setdefault('yaxis', {}).setdefault('type', 'log')
+        layout.setdefault('xaxis', {}).setdefault('showgrid', is_x_grid)
+        layout.setdefault('yaxis', {}).setdefault('showgrid', is_y_grid)
         if is_y2_log:  
           layout.setdefault('yaxis2', {}).setdefault('type', 'log')
         if x_title:
@@ -201,6 +212,7 @@ def main(**kwargs):
         is_contour_labels = st.checkbox('Show labels', value=True)
         is_contour_lines = st.checkbox('Show lines', value=True)
         is_contour_mid = st.checkbox('Set mid', value=False)
+        html_bytes = None
         with st.form(key='contour_params'):
           x_col = st.selectbox(f'X', df4.columns)
           y_col = st.selectbox(f'Y', df4.columns)
@@ -302,6 +314,13 @@ def main(**kwargs):
             fig.update_layout(**layout)
             tab_contour.plotly_chart(fig, use_container_width=False, sharing="streamlit", theme=None)
             st.success('OK')
+            buffer = io.StringIO()
+            fig.write_html(buffer, include_plotlyjs='cdn')
+            fig_contour = buffer.getvalue().encode()
+            st.session_state['fig_contour'] = fig_contour
+        if fig_contour is not None:
+          st.download_button(label='Download plot', data=fig_contour, 
+                             file_name='plot.html', mime='text/html')
       with st.expander('Correlation options'):
         with st.form(key='correlation_params'):
           methods = ['pearson', 'kendall', 'spearman']
@@ -342,6 +361,113 @@ def main(**kwargs):
             fig.update_layout(**layout)
             tab_corr.plotly_chart(fig, use_container_width=False, sharing="streamlit", theme=None)
             st.success('OK')
+      # with st.expander('Contour options'):
+      #   contour_type = st.selectbox('Type', ['levels', 'constraint'])
+        # is_contour_labels = st.checkbox('Show labels', value=True)
+        # is_contour_lines = st.checkbox('Show lines', value=True)
+        # is_contour_mid = st.checkbox('Set mid', value=False)
+        # with st.form(key='contour_params'):
+        #   x_col = st.selectbox(f'X', df4.columns)
+        #   y_col = st.selectbox(f'Y', df4.columns)
+        #   z_col = st.selectbox(f'Z', df4.columns)
+        #   contour_coloring = st.selectbox('Coloring', ['fill', 'heatmap', 'lines', 'none'])
+        #   contour_smoothing = st.number_input('Smoothing', min_value=0., max_value=1.3, value=1.)
+        #   if contour_type == 'levels':
+        #     contour_start = st.number_input('Start')
+        #     contour_end = st.number_input('End')
+        #     contour_size = st.number_input('Size')
+        #     contour_value_0, contour_value_1, contour_operation = None, None, None
+        #   else:  # constraint
+        #     contour_operation = st.selectbox(
+        #       'Operation', ['=', '<', '>=', '>', '<=', '[]', '()', '[)', '(]', '][', ')(', '](', ')['])
+        #     contour_value_0 = st.number_input('Value 0')
+        #     contour_value_1 = st.number_input('Value 1')
+        #     contour_start, contour_end, contour_size = None, None, None
+        #   if is_contour_labels:
+        #     contour_label_size = st.number_input(
+        #       'Label Size', min_value=0, max_value=None, value=12, step=1)
+        #     contour_label_color = st.selectbox(
+        #       'Label Color', ['white', 'black', 'red', 'green', 'blue', 'yellow', 'cyan', 'magenta'])
+        #     contour_label_format = st.text_input(
+        #       'Label Format', value='.0f', help='See https://github.com/d3/d3-format/tree/v1.4.5#d3-format')
+        #   contour_interp = st.selectbox('Interpolation', ['linear', 'nearest', 'cubic'])
+        #   contour_min_x = st.number_input('Min X')
+        #   contour_max_x = st.number_input('Max X')
+        #   contour_num_x = st.number_input('Num X', min_value=2, value=11)
+        #   contour_min_y = st.number_input('Min Y')
+        #   contour_max_y = st.number_input('Max Y')
+        #   contour_num_y = st.number_input('Num Y', min_value=2, value=11)
+        #   contour_min_z = st.number_input('Min Z')
+        #   contour_max_z = st.number_input('Max Z')
+        #   contour_mid_z = st.number_input('Mid Z') if is_contour_mid else None
+        #   countour_button = st.form_submit_button(label='Plot')
+        #   if countour_button:
+        #     df4 = df4[[x_col, y_col, z_col]].dropna()
+        #     xs = df4[x_col].to_numpy(copy=True)
+        #     ys = df4[y_col].to_numpy(copy=True)
+        #     zs = df4[z_col].to_numpy(copy=True)
+        #     if contour_min_x == contour_max_x == 0:
+        #       contour_min_x, contour_max_x = np.nanmin(xs), np.nanmax(xs)
+        #     if contour_min_y == contour_max_y == 0:
+        #       contour_min_y, contour_max_y = np.nanmin(ys), np.nanmax(ys)
+        #     xr = np.linspace(contour_min_x, contour_max_x, contour_num_x)
+        #     yr = np.linspace(contour_min_y, contour_max_y, contour_num_y)
+        #     xr, yr = np.meshgrid(xr, yr)
+        #     Z = griddata((xs, ys), zs, (xr, yr), method=contour_interp)
+        #     contours = {'type': contour_type, 
+        #                 'operation': contour_operation,
+        #                 'coloring': contour_coloring}
+        #     if contour_type == 'levels':
+        #       if contour_start == contour_end == 0:
+        #         contours['start'] = np.nanmin(Z)
+        #         contours['end'] = np.nanmax(Z)
+        #         if contour_size == 0:
+        #           contours['size'] = (np.nanmax(Z) - np.nanmin(Z)) / 10
+        #         else:
+        #           contours['size'] = contour_size
+        #       else:
+        #         contours['start'] = contour_start
+        #         contours['end'] = contour_end
+        #         contours['size'] = contour_size
+        #     else:
+        #       if contour_operation in ['=', '<', '>=', '>', '<=']:
+        #         contours['value'] = contour_value_0
+        #       else:
+        #         contours['value'] = [contour_value_0, contour_value_1]   
+        #     if is_contour_labels:
+        #       contours.update({      
+        #         'showlabels': is_contour_labels,
+        #         'labelformat': contour_label_format,
+        #         'labelfont': {
+        #           'size': contour_label_size,
+        #           'color': contour_label_color}})
+        #     contours['showlines'] = is_contour_lines
+        #     contour_kwargs = {
+        #       'x': xr[0], 'y': yr[:, 0], 'z': Z, 
+        #       'line_smoothing': contour_smoothing,
+        #       'colorscale': continuous_color,
+        #       'contours': contours
+        #     }
+        #     try:
+        #       contour_kwargs['colorbar'] = {'title': layout['coloraxis']['colorbar']['title']['text']}
+        #     except Exception as e:
+        #       contour_kwargs['colorbar'] = {'title': z_col}
+        #     if contour_mid_z is not None:
+        #       contour_kwargs['zmid'] = contour_mid_z
+        #     if contour_min_z == contour_max_z == 0:
+        #       contour_kwargs['zauto'] = True
+        #     else:
+        #       contour_kwargs['zauto'] = False
+        #       contour_kwargs['zmin'] = contour_min_z
+        #       contour_kwargs['zmax'] = contour_max_z
+        #     # print(contour_kwargs)
+        
+#             fig = go.Figure(data=go.Contour(**contour_kwargs))
+#             layout.setdefault('xaxis', {}).setdefault('title', {}).setdefault('text', x_col)
+#             layout.setdefault('yaxis', {}).setdefault('title', {}).setdefault('text', y_col)
+#             fig.update_layout(**layout)
+#             tab_contour.plotly_chart(fig, use_container_width=False, sharing="streamlit", theme=None)
+#             st.success('OK')
 
             
 def load_study(url, study_name):
@@ -355,11 +481,168 @@ def load_study(url, study_name):
 def convert_df(df):
    return df.to_csv(index=False).encode('utf-8')
 
-  
-def correct_temperature(df, column, new_column, k, initial):
-  new_df = initial + (df[column] - initial) / df[k]
-  new_df.name = new_column
+
+def scale(df, base, new, initial, coefficient):
+  coefficient = df[coefficient] if isinstance(coefficient, str) else coefficient
+  initial = df[initial] if isinstance(initial, str) else initial
+  base = df[base] if isinstance(base, str) else base
+  new_df = coefficient*(base - initial) + initial
+  new_df.name = new
   return [new_df]
+  
+  
+def contours(df):
+  fig = go.Figure(data=go.Contour(**contour_kwargs))
+  layout.setdefault('xaxis', {}).setdefault('title', {}).setdefault('text', x_col)
+  layout.setdefault('yaxis', {}).setdefault('title', {}).setdefault('text', y_col)
+  fig.update_layout(**layout)
+  tab_contour.plotly_chart(fig, use_container_width=False, sharing="streamlit", theme=None)
+  st.success('OK')
+  # def nb_dx(input_file):
+  # pd.set_option('display.max_columns', None)
+  # p = Path(input_file)
+  # df = preprocess(input_file)
+  # print(len(df))
+  # df = df[df['state'] == "COMPLETE"]
+  # print(len(df))
+  # df = df[df['concept'] == 'borehole']
+  # df = df[df['size.rock'] == 10]
+  # df = df[df['nb'] < 10]
+  # df = df[df['dx'] < 100]
+  # # print(len(df))
+  # cols = ['q.limit', 'q.limit.container', 't.max',
+  #         't.ebs.max', 't.castiron.max', 't.rock.max', 't.fill.max', 't.hill.max']
+  # # Quality weighted
+  # groups = df.groupby(['dz.rock', 'dr', 'dh', 'dx', 'nb'], as_index=False)
+  # a2f = {x: 'last' for x in df}
+  # for c in cols:
+  #   a2f[c] = lambda x: np.average(x, weights=df.loc[x.index, "quality"])
+  #   # a2f[c] = 'max'
+  # df2 = groups.agg(a2f)
+  # df = df2
+  # # Extrapolate
+  # order = 1
+  # weights = [1, 1, 1, 1, 1]
+  # cols_id = ['dx', 'nb', 'dr', 'dz.rock', 'dh']
+  # polys = {x: {y: np.poly1d(np.polyfit(df[x], df[y], order)) for y in cols} for x in cols_id}
+  # dfs = [df]
+  # for ids in product([10, 15, 20, 30, 50], [2, 5, 10], [0.5, 1], [50], [1, 2]):
+  #   r = df[np.logical_and.reduce([df[x] == y for x, y in zip(cols_id, ids)])]
+  #   if len(r) == 0:
+  #     row = {x: y for x, y in zip(cols_id, ids)}
+  #     for c in cols:
+  #       values = []
+  #       for k, v in zip(cols_id, ids):
+  #         mask = np.logical_and.reduce([df[x] == y for x, y in zip(cols_id, ids) if x != k])
+  #         if len(df[mask]) > 1:
+  #           vv = np.poly1d(np.polyfit(df[mask][k], df[mask][c], order))(v)
+  #         else:
+  #           vv = polys[k][c](v)
+  #         values.append(vv)
+  #       row[c] = np.average(values, weights=weights)
+  #     dfs.append(pd.DataFrame([row]))
+  # df = pd.concat(dfs, ignore_index=True)
+  # df2 = df
+  # # cnt = 0
+  # # cols = ['dz.rock', 'dr', 'dh', 'dx', 'nb']
+  # # for name, g in df.groupby(cols, as_index=False):
+  # #   cnt += 1
+  # #   print(name, len(g))
+  # #   fig = px.scatter(g,
+  # #                    x="quality",
+  # #                    y='t.max',
+  # #                    # color='zone',
+  # #                    # facet_col='zone',
+  # #                    # facet_col_wrap=1,
+  # #                    log_x=True, 
+  # #                    # trendline="ols", trendline_options=dict(log_x=True),
+  # #                    trendline="lowess",
+  # #                    # trendline="ols",     
+  # #                    # trendline_options=dict(log_x=True),
+  # #                    trendline_options=dict(frac=0.67),
+  # #                    # trendline_color_override='white',
+  # #                    template='plotly_dark',
+  # #                    )
+  # #   mask = np.logical_and.reduce([df2[x] == y for x, y in zip(cols, name)])
+  # #   wa = df2[mask]
+  # #   fig.add_hline(y=wa['t.max'].item(), line_width=1, line_dash="dash", line_color="white")
+  # #   fig.write_image(f'group_{name}.png')
+  # #   fig.write_html(f'group_{name}.html')
+  # #   if cnt == 100:
+  # #     break
+  # # print(df2.head(5))
+  # groups = df2.groupby(['dz.rock', 'dr', 'dh'], as_index=False)
+  # n_levels = 50
+  # num = 100
+  # ms = 1
+  # for name, g in groups:
+  #   dz, dr, dh = name
+  #   print(name, len(g))
+  #   # # EBS
+  #   # tri_by_xyz(p, g, 
+  #   #            x='dx', y='nb', z='t.ebs.max', 
+  #   #            x_label='Расстояние между скважинами, м', 
+  #   #            y_label='Контейнеров на скважину, шт', 
+  #   #            title= (f'Температура в ИББ при тепловыделении 1000 Вт/м3'
+  #   #                    f'\nРасстояние между контейнерами {dh} м'
+  #   #                    f'\nТолщина ИББ {dr} м' 
+  #   #                    f'\nГлубина {dz} м'),
+  #   #            cb_label='Температура, °C', suffix=f'ebs_max_{name}',
+  #   #            colormap='jet', n_levels=n_levels, num=num, ms=ms)
+  #   # # Rock
+  #   # tri_by_xyz(p, g, x='dx', y='nb', z='t.rock.max', 
+  #   #            x_label='Расстояние между скважинами, м', 
+  #   #            y_label='Контейнеров на скважину, шт', 
+  #   #            title= (f'Температура в среде при тепловыделении 1000 Вт/м3'
+  #   #                    f'\nРасстояние между контейнерами {dh} м'
+  #   #                    f'\nТолщина ИББ {dr} м' 
+  #   #                    f'\nГлубина {dz} м'),
+  #   #            cb_label='Температура, °C', suffix=f'rock_max_{name}',
+  #   #            colormap='jet', n_levels=n_levels, num=num, ms=ms)
+  #   # # EBS < 150
+  #   # for k in [0.3, 0.4, 0.5, 0.6, 0.7, 1.0, 1.5]:
+  #   #   t0 = 9.0
+  #   #   c = 't.ebs.max'
+  #   #   tlim = 150
+  #   #   df2['dt'] = tlim - (k*(df2[c] - t0) + t0)
+  #   #   tri_by_xyz_zero(p, g, x='dx', y='nb', z='dt', 
+  #   #                   x_label='Расстояние между скважинами, м',
+  #   #                   y_label='Контейнеров на скважину, шт', 
+  #   #                   title= (f'Критерий 150°C в ИББ при тепловыделении {k*1000:.0f} Вт/м3'
+  #   #                           f'\nРасстояние между контейнерами {dh} м'
+  #   #                           f'\nТолщина ИББ {dr} м' 
+  #   #                           f'\nГлубина {dz} м'),
+  #   #                   cb_label='Запас по температуре, °C', suffix=f'ebs_{name}_{k}',
+  #   #                   colormap='RdBu', n_levels=n_levels, num=num, linewidth=1, ms=ms)
+  #   # # Rock < 100
+  #   # for k in [0.3, 0.4, 0.5, 0.6, 0.7, 1.0, 1.5]:
+  #   #   c = 't.rock.max'
+  #   #   t0 = 9.0
+  #   #   tlim = 100
+  #   #   df2['dt'] = tlim - (k*(df2[c] - t0) + t0)
+  #   #   tri_by_xyz_zero(p, g, x='dx', y='nb', z='dt', 
+  #   #                   x_label='Расстояние между скважинами, м', 
+  #   #                   y_label='Контейнеров на скважину, шт', 
+  #   #                   title= (f'Критерий 100°C в среде при тепловыделении {k*1000:.0f} Вт/м3'
+  #   #                           f'\nРасстояние между контейнерами {dh} м'
+  #   #                           f'\nТолщина ИББ {dr} м' 
+  #   #                           f'\nГлубина {dz} м'),
+  #   #                   cb_label='Запас по температуре, °C', suffix=f'rock_{name}_{k}',
+  #   #                   colormap='RdBu', n_levels=n_levels, num=num, linewidth=1, ms=ms)
+  #   # All
+  #   t0 = 9.0
+  #   for k in [0.3, 0.4, 0.5, 0.6, 0.7, 1.0, 1.5]:
+  #     g['Порода < 100°C'] = 100 - (k*(g['t.rock.max'] - t0) + t0)
+  #     g['ИББ < 150°C'] = 150 - (k*(g['t.ebs.max'] - t0) + t0)
+  #     contours_zero(p, g, x='dx', y='nb', z=['Порода < 100°C', 'ИББ < 150°C'], 
+  #                   suffix=f'{name}_{k}', 
+  #                   x_label='Расстояние между скважинами, м', 
+  #                   y_label='Контейнеров на скважину, шт', 
+  #                   title= (f'Критерии при тепловыделении {k*1000:.0f} Вт/м3'
+  #                           f'\nРасстояние между контейнерами {dh} м'
+  #                           f'\nТолщина ИББ {dr} м' 
+  #                            f'\nГлубина {dz} м'),
+  #                   colormap='RdBu', n_levels=n_levels, num=num, linewidth=1, ms=ms)
   
 
 if __name__ == '__main__':
