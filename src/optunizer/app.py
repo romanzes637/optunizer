@@ -22,7 +22,12 @@ def main(**kwargs):
   url, study_name = None, None
   df = st.session_state['df'] if 'df' in st.session_state else None
   df2 = st.session_state['df2'] if 'df2' in st.session_state else None
+  fig_scatter = st.session_state['fig_scatter'] if 'fig_scatter' in st.session_state else None
   fig_contour = st.session_state['fig_contour'] if 'fig_contour' in st.session_state else None
+  fig_fenia = st.session_state['fig_fenia'] if 'fig_fenia' in st.session_state else None
+  fig_corr = st.session_state['fig_corr'] if 'fig_corr' in st.session_state else None
+  tab_fenia, tab_table, tab_scatter, tab_corr, tab_contour = st.tabs([
+    'FENIA', 'Table', 'Scatter', 'Correlation', 'Contour'])
   with st.sidebar:
     with st.expander('Data options'):
       with st.form(key='storage_params'):
@@ -46,10 +51,145 @@ def main(**kwargs):
             st.json(json.dumps(stats))
       if df is not None:
         csv = convert_df(df)
-        st.download_button("Download CSV", csv, "data.csv", "text/csv") 
+        st.download_button("Download CSV", csv, "data.csv", "text/csv")
+    with st.expander('Layout'):
+      templates = ["plotly", "plotly_white", "plotly_dark", "ggplot2", "seaborn",
+                   "simple_white", "none"]
+      template = st.selectbox('Template', templates, 
+                              index=templates.index('plotly_dark'),
+                              help='See also: ≡ → Settings → Theme')
+      continuous_colors = px.colors.named_colorscales()
+      continuous_color = st.selectbox('Continuous color', 
+                                      continuous_colors, 
+                                      index=continuous_colors.index('viridis'))
+      is_continuous_reversed = st.checkbox('Reverse continuous', value=False)
+      if is_continuous_reversed: 
+        continuous_color += '_r'
+      is_x_log = st.checkbox('Log X', value=False)
+      is_y_log = st.checkbox('Log Y', value=False)
+      is_x_grid = st.checkbox('Grid X', value=False)
+      is_y_grid = st.checkbox('Grid Y', value=False)
+      is_y2_log = st.checkbox('Log Y2', value=False)
+      x_title = st.text_input('Title X')
+      y_title = st.text_input('Title Y')
+      y2_title = st.text_input('Title Y2')
+      legend_title = st.text_input('Title legend')
+      colorbar_title = st.text_input('Title colorbar')
+      fonts = ["Arial", "Balto", "Courier New", "Droid Sans", "Droid Serif", 
+               "Droid Sans Mono", "Gravitas One", "Old Standard TT", "Open Sans", 
+               "Overpass", "PT Sans Narrow", "Raleway", "Times New Roman", 
+               "Roboto", "Roboto Mono"]
+      font_family = st.selectbox('Font', fonts, index=fonts.index('Roboto Mono'))
+      font_size = st.number_input('Font size', min_value=0, value=12, step=1)
+      layout = {'template': template, 'font_family': font_family, 'font_size': font_size}
+      if is_x_log:  
+        layout.setdefault('xaxis', {}).setdefault('type', 'log')
+      if is_y_log:  
+        layout.setdefault('yaxis', {}).setdefault('type', 'log')
+      layout.setdefault('xaxis', {}).setdefault('showgrid', is_x_grid)
+      layout.setdefault('yaxis', {}).setdefault('showgrid', is_y_grid)
+      if is_y2_log:  
+        layout.setdefault('yaxis2', {}).setdefault('type', 'log')
+      if x_title:
+        layout.setdefault('xaxis', {}).setdefault('title', {}).setdefault('text', x_title)
+      if y_title:
+        layout.setdefault('yaxis', {}).setdefault('title', {}).setdefault('text', y_title)
+      if y2_title:
+        layout.setdefault('yaxis2', {}).setdefault('title', {}).setdefault('text', y2_title)
+      if legend_title:
+        layout.setdefault('legend', {}).setdefault('title', {}).setdefault('text', legend_title)
+      if colorbar_title:
+        layout.setdefault('coloraxis', {}).setdefault('colorbar', {}).setdefault(
+          'title', {}).setdefault('text', colorbar_title)     
+    with st.expander('FENIA'):
+      fenia_type = st.selectbox('Type', ['time_zones'])
+      with st.form(key='fenia_params'):
+        fenia_files = st.file_uploader("Files", accept_multiple_files=True)
+        fenia_k = st.number_input(f'Coefficient', value=1.0)
+        fenia_vol = st.number_input(f'Volume', value=0.0)
+        fenia_init_t = st.number_input(f'Initial temperature', value=9.0)
+        fenia_button = st.form_submit_button(label='Plot')
+        if fenia_button:
+          if fenia_type == 'time_zones':
+            max_zone_time_ts = []
+            zone_names = []
+            zone_volumes = []
+            for f in fenia_files:
+              buffer = io.StringIO(f.getvalue().decode("utf-8"))
+              string_data = buffer.read()
+              if 'maxZoneTt' in f.name:
+                start_line = 13
+                end_line = -1
+                for line in string_data.split('\n')[start_line:end_line]:
+                  line = line.strip()
+                  if line != '':
+                    n_values, values = line.split('(')
+                    n_values = int(n_values)
+                    values = [float(x) for x in values[:-1].split()]
+                    max_zone_time_ts.append(values)
+              if 'zoneNames' in f.name:
+                start_line = 13
+                end_line = -2
+                string_data = string_data.replace('(', ' ').replace(')', ' ').replace(';', ' ')
+                string_data = ' '.join(x.strip() for x in string_data.split('\n')[start_line:end_line])
+                zone_names = [x for x in string_data.split()
+                              if x != '' and not x.isnumeric()]
+              if 'zoneVol' in f.name:
+                start_line = 13
+                end_line = -2
+                string_data = string_data.replace('(', ' ').replace(')', ' ').replace(';', ' ')
+                string_data = ' '.join(x.strip() for x in string_data.split('\n')[start_line:end_line])
+                for token in string_data.split():
+                  try:
+                    token = float(token)
+                  except:
+                    continue
+                  else:
+                    zone_volumes.append(token)
+                zone_volumes = zone_volumes[1:]
+            print(zone_names)
+            print(zone_volumes)
+            zone2vol = dict(zip(zone_names, zone_volumes))
+            zone2index = dict(zip(zone_names, range(len(zone_names))))
+            zone2init = {x: fenia_init_t for x in zone_names}
+            zone2init['Filling'] = 110
+            zone2init['CastIron'] = 110
+            print(zone2vol)
+            print(zone2index)
+            print(zone2init)
+            for zone, init in zone2init.items():
+              max_zone_time_ts[0][1+zone2index[zone]] = init
+            columns = ['time'] + zone_names
+            df_fenia = pd.DataFrame.from_records(max_zone_time_ts, columns=columns, index='time')
+            df_fenia.index /= (86400*365.25)
+            print(df_fenia)
+            if fenia_vol != 0:
+              k_vol = fenia_vol / zone2vol['Filling']
+            else:
+              k_vol = 1
+            k_all = k_vol*fenia_k
+            for zone in zone_names:
+              df_fenia[zone] = k_all*(df_fenia[zone] - fenia_init_t) + fenia_init_t
+            print(df_fenia)
+            eng2rus = {'Filling': 'РАО', 
+                       'Plate': 'Перегородки', 
+                       'Environment': 'Среда', 
+                       'CastIron': 'ТУК', 
+                       'EBS': 'Бентонит', 
+                       'Wall': 'Стенки'}
+            df_fenia = df_fenia.rename(eng2rus, axis='columns')
+            fig = px.line(data_frame=df_fenia)
+            fig.update_layout(**layout)
+            tab_fenia.plotly_chart(fig, use_container_width=False, sharing="streamlit", theme=None)
+            buffer = io.StringIO()
+            fig.write_html(buffer, include_plotlyjs='cdn')
+            fig_fenia = buffer.getvalue().encode()
+            st.session_state['fig_fenia'] = fig_fenia
+          st.success('OK')
+      if fig_fenia is not None:
+        st.download_button(label='Download', data=fig_fenia, 
+                           file_name='fenia.html', mime='text/html')  
   if df is not None:
-    tab_table, tab_scatter, tab_corr, tab_contour = st.tabs([
-      'Table', 'Scatter', 'Correlation', 'Contour'])
     with st.sidebar:
       with st.expander('Transforms'):
         transforms_names = ['pandas', 'scale', 'post_pandas', 'filter']
@@ -123,55 +263,6 @@ def main(**kwargs):
         df4 = df2
       else:
         df4 = df
-      with st.expander('Layout options'):
-        templates = ["plotly", "plotly_white", "plotly_dark", "ggplot2", "seaborn",
-                     "simple_white", "none"]
-        template = st.selectbox('Template', templates, 
-                                index=templates.index('plotly_dark'),
-                                help='See also: ≡ → Settings → Theme')
-        continuous_colors = px.colors.named_colorscales()
-        continuous_color = st.selectbox('Continuous color', 
-                                        continuous_colors, 
-                                        index=continuous_colors.index('viridis'))
-        is_continuous_reversed = st.checkbox('Reverse continuous', value=False)
-        if is_continuous_reversed: 
-          continuous_color += '_r'
-        is_x_log = st.checkbox('Log X', value=False)
-        is_y_log = st.checkbox('Log Y', value=False)
-        is_x_grid = st.checkbox('Grid X', value=False)
-        is_y_grid = st.checkbox('Grid Y', value=False)
-        is_y2_log = st.checkbox('Log Y2', value=False)
-        x_title = st.text_input('Title X')
-        y_title = st.text_input('Title Y')
-        y2_title = st.text_input('Title Y2')
-        legend_title = st.text_input('Title legend')
-        colorbar_title = st.text_input('Title colorbar')
-        fonts = ["Arial", "Balto", "Courier New", "Droid Sans", "Droid Serif", 
-                 "Droid Sans Mono", "Gravitas One", "Old Standard TT", "Open Sans", 
-                 "Overpass", "PT Sans Narrow", "Raleway", "Times New Roman", 
-                 "Roboto", "Roboto Mono"]
-        font_family = st.selectbox('Font', fonts, index=fonts.index('Roboto Mono'))
-        font_size = st.number_input('Font size', min_value=0, value=12, step=1)
-        layout = {'template': template, 'font_family': font_family, 'font_size': font_size}
-        if is_x_log:  
-          layout.setdefault('xaxis', {}).setdefault('type', 'log')
-        if is_y_log:  
-          layout.setdefault('yaxis', {}).setdefault('type', 'log')
-        layout.setdefault('xaxis', {}).setdefault('showgrid', is_x_grid)
-        layout.setdefault('yaxis', {}).setdefault('showgrid', is_y_grid)
-        if is_y2_log:  
-          layout.setdefault('yaxis2', {}).setdefault('type', 'log')
-        if x_title:
-          layout.setdefault('xaxis', {}).setdefault('title', {}).setdefault('text', x_title)
-        if y_title:
-          layout.setdefault('yaxis', {}).setdefault('title', {}).setdefault('text', y_title)
-        if y2_title:
-          layout.setdefault('yaxis2', {}).setdefault('title', {}).setdefault('text', y2_title)
-        if legend_title:
-          layout.setdefault('legend', {}).setdefault('title', {}).setdefault('text', legend_title)
-        if colorbar_title:
-          layout.setdefault('coloraxis', {}).setdefault('colorbar', {}).setdefault(
-            'title', {}).setdefault('text', colorbar_title)
       with st.expander('Table options'):
         with st.form(key='table_params'):
           table_button = st.form_submit_button(label='Plot')
@@ -206,7 +297,14 @@ def main(**kwargs):
                              color_continuous_scale=continuous_color)
             fig.update_layout(**layout)
             tab_scatter.plotly_chart(fig, use_container_width=False, sharing="streamlit", theme=None)
+            buffer = io.StringIO()
+            fig.write_html(buffer, include_plotlyjs='cdn')
+            fig_scatter = buffer.getvalue().encode()
+            st.session_state['fig_scatter'] = fig_scatter
             st.success('OK')
+        if fig_scatter is not None:
+          st.download_button(label='Download', data=fig_scatter, 
+                             file_name='scatter.html', mime='text/html')
       with st.expander('Contour options'):
         contour_type = st.selectbox('Type', ['levels', 'constraint'])
         is_contour_labels = st.checkbox('Show labels', value=True)
@@ -319,8 +417,8 @@ def main(**kwargs):
             fig_contour = buffer.getvalue().encode()
             st.session_state['fig_contour'] = fig_contour
         if fig_contour is not None:
-          st.download_button(label='Download plot', data=fig_contour, 
-                             file_name='plot.html', mime='text/html')
+          st.download_button(label='Download', data=fig_contour, 
+                             file_name='contour.html', mime='text/html')
       with st.expander('Correlation options'):
         with st.form(key='correlation_params'):
           methods = ['pearson', 'kendall', 'spearman']
@@ -328,6 +426,9 @@ def main(**kwargs):
           cell_size = st.number_input('Cell size', min_value=0, max_value=None, value=30, step=1)
           columns = st.multiselect('Columns', df4.columns)
           do_add_params = st.checkbox('Add params to columns', value=False)
+          do_plot_titles = st.checkbox('Plot titles', value=False)
+          titles = st.text_input('Titles', help='Divided by "|"').split('|')
+          plot_bgcolor = st.text_input('Background color', value='rgb(30, 30, 30)')
           corr_button = st.form_submit_button(label='Plot')
           if corr_button:
             if do_add_params:
@@ -335,6 +436,10 @@ def main(**kwargs):
               params.update(columns)
               columns = list(params)
             df4 = df4[df4['state'] == 'COMPLETE']
+            if len(titles) == len(columns) and do_plot_titles:
+              old2new = dict(zip(columns, titles))
+              df4 = df4.rename(old2new, axis='columns')
+              columns = titles
             corr = df4[columns].corr(method=method)
             fig = px.imshow(img=corr,
                             x=corr.columns, 
@@ -354,13 +459,20 @@ def main(**kwargs):
             layout['margin'] = margin
             layout['coloraxis_showscale'] = False
             layout['autosize'] = False
-            layout['plot_bgcolor'] = 'rgb(30, 30, 30)'
+            layout['plot_bgcolor'] = plot_bgcolor
             layout.setdefault('xaxis', {}).setdefault('side', 'top')
-            layout.setdefault('xaxis', {}).setdefault('visible', False)
-            layout.setdefault('yaxis', {}).setdefault('visible', False)
+            layout.setdefault('xaxis', {}).setdefault('visible', do_plot_titles)
+            layout.setdefault('yaxis', {}).setdefault('visible', do_plot_titles)
             fig.update_layout(**layout)
             tab_corr.plotly_chart(fig, use_container_width=False, sharing="streamlit", theme=None)
+            buffer = io.StringIO()
+            fig.write_html(buffer, include_plotlyjs='cdn')
+            fig_corr = buffer.getvalue().encode()
+            st.session_state['fig_corr'] = fig_corr
             st.success('OK')
+        if fig_corr is not None:
+          st.download_button(label='Download', data=fig_corr, 
+                             file_name='corr.html', mime='text/html')  
       # with st.expander('Contour options'):
       #   contour_type = st.selectbox('Type', ['levels', 'constraint'])
         # is_contour_labels = st.checkbox('Show labels', value=True)
@@ -461,13 +573,13 @@ def main(**kwargs):
         #       contour_kwargs['zmin'] = contour_min_z
         #       contour_kwargs['zmax'] = contour_max_z
         #     # print(contour_kwargs)
-        
-#             fig = go.Figure(data=go.Contour(**contour_kwargs))
-#             layout.setdefault('xaxis', {}).setdefault('title', {}).setdefault('text', x_col)
-#             layout.setdefault('yaxis', {}).setdefault('title', {}).setdefault('text', y_col)
-#             fig.update_layout(**layout)
-#             tab_contour.plotly_chart(fig, use_container_width=False, sharing="streamlit", theme=None)
-#             st.success('OK')
+
+      #             fig = go.Figure(data=go.Contour(**contour_kwargs))
+      #             layout.setdefault('xaxis', {}).setdefault('title', {}).setdefault('text', x_col)
+      #             layout.setdefault('yaxis', {}).setdefault('title', {}).setdefault('text', y_col)
+      #             fig.update_layout(**layout)
+      #             tab_contour.plotly_chart(fig, use_container_width=False, sharing="streamlit", theme=None)
+      #             st.success('OK')
 
             
 def load_study(url, study_name):
