@@ -3,8 +3,9 @@ from pathlib import Path
 import sys
 import json
 import io
+from pprint import pprint
 
-from matplotlib.tri import Triangulation, UniformTriRefiner, LinearTriInterpolator, CubicTriInterpolator
+# from matplotlib.tri import Triangulation, UniformTriRefiner, LinearTriInterpolator, CubicTriInterpolator
 import numpy as np
 import optuna
 import pandas as pd
@@ -28,15 +29,16 @@ def main(**kwargs):
   fig_corr = st.session_state['fig_corr'] if 'fig_corr' in st.session_state else None
   tab_fenia, tab_table, tab_scatter, tab_corr, tab_contour = st.tabs([
     'FENIA', 'Table', 'Scatter', 'Correlation', 'Contour'])
+  template_state = st.session_state.get('template_state', {})
   with st.sidebar:
-    with st.expander('Data options'):
-      with st.form(key='storage_params'):
+    with st.expander('Data'):
+      with st.form(key='storage_form'):
         url = st.text_input('Storage URL', type='password').strip()
         url_button = st.form_submit_button(label='Update storage')
         if url_button:
           st.success('OK')
       if url:
-        with st.form(key='study_params'):
+        with st.form(key='study_form'):
           studies = optuna.study.get_all_study_summaries(storage=url)
           studies_names = [x.study_name for x in studies]
           study_name = st.selectbox(f'Study name', sorted(studies_names))
@@ -52,35 +54,89 @@ def main(**kwargs):
       if df is not None:
         csv = convert_df(df)
         st.download_button("Download CSV", csv, "data.csv", "text/csv")
+    with st.expander('Template'):
+      template_dir = 'templates'
+      template_path = Path(template_dir)
+      template_path.mkdir(parents=True, exist_ok=True)
+      template_files = [p for p in template_path.iterdir() if p.is_file()]
+      template_files_names = sorted([x.stem for x in template_files])
+      template_reset = st.button(label='Reset')  
+      if template_reset:
+        template_state = {}
+        st.session_state['template_state'] = template_state
+        st.success(f'Template reset')
+        # st.experimental_rerun()  # auto?
+      with st.form(key='template_form_load'):
+        template_load_name = st.selectbox('Name', template_files_names)
+        template_load = st.form_submit_button(label='Load')
+        if template_load:
+          template_file = template_path / f'{template_load_name}.json'
+          with open(template_file) as f:
+            template_state = json.load(f)
+          pprint(template_state)
+          # Cannot be modified after the widget is instantiated
+          # https://docs.streamlit.io/library/api-reference/session-state#caveats-and-limitations
+          # st.session_state.update(template_state)  
+          st.session_state['template_state'] = template_state
+          st.success(f'Template "{template_load_name}" loaded')
+          st.experimental_rerun()
+      with st.form(key='template_form_save'):
+        template_save_name = st.text_input('Name')
+        template_save = st.form_submit_button(label='Save')
+        if template_save:
+          template_file = template_path / f'{template_save_name}.json'
+          template_state = {k: v for k, v in st.session_state.items()
+                            if isinstance(v, (str, int, float, bool, list))}
+          with open(template_file, 'w') as f:
+            json.dump(template_state, f, indent=2)
+          pprint(template_state)
+          st.success(f'Template "{template_save_name}" saved')
+          st.experimental_rerun()
     with st.expander('Layout'):
-      templates = ["plotly", "plotly_white", "plotly_dark", "ggplot2", "seaborn",
-                   "simple_white", "none"]
-      template = st.selectbox('Template', templates, 
-                              index=templates.index('plotly_dark'),
-                              help='See also: ≡ → Settings → Theme')
-      continuous_colors = px.colors.named_colorscales()
-      continuous_color = st.selectbox('Continuous color', 
-                                      continuous_colors, 
-                                      index=continuous_colors.index('viridis'))
-      is_continuous_reversed = st.checkbox('Reverse continuous', value=False)
+      template = init_template(template_state, st.selectbox, label='Template',
+                               key='layout_template', 
+                               options=["plotly", "plotly_white", "plotly_dark", 
+                                        "ggplot2", "seaborn", "simple_white", "none"],
+                               help='See also: ≡ → Settings → Theme')
+      continuous_color = init_template(template_state, st.selectbox, label='Template',
+                                       key='layout_continuous_colors',
+                                       options=px.colors.named_colorscales(), 
+                                       default='viridis')
+      is_continuous_reversed = init_template(template_state, st.checkbox, 
+                                             key='layout_is_continuous_reversed',
+                                             label='Reverse continuous', default=False)
       if is_continuous_reversed: 
         continuous_color += '_r'
-      is_x_log = st.checkbox('Log X', value=False)
-      is_y_log = st.checkbox('Log Y', value=False)
-      is_x_grid = st.checkbox('Grid X', value=False)
-      is_y_grid = st.checkbox('Grid Y', value=False)
-      is_y2_log = st.checkbox('Log Y2', value=False)
-      x_title = st.text_input('Title X')
-      y_title = st.text_input('Title Y')
-      y2_title = st.text_input('Title Y2')
-      legend_title = st.text_input('Title legend')
-      colorbar_title = st.text_input('Title colorbar')
-      fonts = ["Arial", "Balto", "Courier New", "Droid Sans", "Droid Serif", 
-               "Droid Sans Mono", "Gravitas One", "Old Standard TT", "Open Sans", 
-               "Overpass", "PT Sans Narrow", "Raleway", "Times New Roman", 
-               "Roboto", "Roboto Mono"]
-      font_family = st.selectbox('Font', fonts, index=fonts.index('Roboto Mono'))
-      font_size = st.number_input('Font size', min_value=0, value=12, step=1)
+      is_x_log = init_template(template_state, st.checkbox, label='Log X', 
+                               key='layout_is_x_log', default=False)
+      is_y_log = init_template(template_state, st.checkbox, label='Log Y', 
+                               key='layout_is_y_log', default=False)
+      is_y2_log = init_template(template_state, st.checkbox, label='Log Y2', 
+                                key='layout_is_y2_log', default=False)
+      is_x_grid = init_template(template_state, st.checkbox, label='Grid X', 
+                                key='layout_is_x_grid', default=False)
+      is_y_grid = init_template(template_state, st.checkbox, label='Grid Y', 
+                                key='layout_is_y_grid', default=False)
+      title = init_template(template_state, st.text_input, label='Title', 
+                            key='layout_title', default='')
+      x_title = init_template(template_state, st.text_input, label='Title X', 
+                              key='layout_x_title', default='')
+      y_title = init_template(template_state, st.text_input, label='Title Y', 
+                              key='layout_y_title', default='')
+      y2_title = init_template(template_state, st.text_input, label='Title Y2', 
+                               key='layout_y2_title', default='')
+      legend_title = init_template(template_state, st.text_input, label='Title legend', 
+                              key='layout_legend_title', default='')
+      colorbar_title = init_template(template_state, st.text_input, label='Title colorbar', 
+                              key='layout_colorbar_title', default='')
+      font_family = init_template(
+        template_state, st.selectbox, label='Font', key='layout_font', default='Roboto Mono',
+        options=["Arial", "Balto", "Courier New", "Droid Sans", "Droid Serif", 
+                 "Droid Sans Mono", "Gravitas One", "Old Standard TT", "Open Sans", 
+                 "Overpass", "PT Sans Narrow", "Raleway", "Times New Roman", 
+                 "Roboto", "Roboto Mono"])
+      font_size = init_template(template_state, st.number_input, label='Font size', 
+                                key='layout_font_size', default=12, min_value=0, step=1)
       layout = {'template': template, 'font_family': font_family, 'font_size': font_size}
       if is_x_log:  
         layout.setdefault('xaxis', {}).setdefault('type', 'log')
@@ -90,6 +146,8 @@ def main(**kwargs):
       layout.setdefault('yaxis', {}).setdefault('showgrid', is_y_grid)
       if is_y2_log:  
         layout.setdefault('yaxis2', {}).setdefault('type', 'log')
+      if title:
+        layout.setdefault('title', {}).setdefault('text', title)
       if x_title:
         layout.setdefault('xaxis', {}).setdefault('title', {}).setdefault('text', x_title)
       if y_title:
@@ -100,10 +158,11 @@ def main(**kwargs):
         layout.setdefault('legend', {}).setdefault('title', {}).setdefault('text', legend_title)
       if colorbar_title:
         layout.setdefault('coloraxis', {}).setdefault('colorbar', {}).setdefault(
-          'title', {}).setdefault('text', colorbar_title)     
+          'title', {}).setdefault('text', colorbar_title)
+      # pprint(layout)
     with st.expander('FENIA'):
       fenia_type = st.selectbox('Type', ['time_zones'])
-      with st.form(key='fenia_params'):
+      with st.form(key='fenia_form'):
         fenia_files = st.file_uploader("Files", accept_multiple_files=True)
         fenia_k = st.number_input(f'Coefficient', value=1.0)
         fenia_vol = st.number_input(f'Volume', value=0.0)
@@ -191,40 +250,64 @@ def main(**kwargs):
                            file_name='fenia.html', mime='text/html')  
   if df is not None:
     with st.sidebar:
-      with st.expander('Transforms'):
-        transforms_names = ['pandas', 'scale', 'post_pandas', 'filter']
-        n_transforms = {}
+      with st.expander('Transform'):
+        transforms_names = ['pandas', 'post_pandas', 'scale', 'post_post_pandas', 'filter']
+        transform_numbers = {}
         for t in transforms_names:
-          n_transforms[t] = st.number_input(f'Number of {t}', min_value=0, max_value=None, value=0, step=1)
-        with st.form(key='transforms'):
+          transform_numbers[t] = init_template(template_state, st.number_input, 
+                                               label=f'Number of {t}', 
+                                               key=f'transform_{t}_number', default=0, 
+                                               min_value=0, max_value=None, step=1)
+        with st.form(key='transform_form'):
           transforms = []
-          for name, number in n_transforms.items():
+          for name, number in transform_numbers.items():
             for i in range(number):
               st.header(f'{name} {i+1}')
-              if name in ['pandas', 'post_pandas']:
+              base_options = list(df.columns)
+              base_key = f'transform_{name}_base_{i+1}'
+              base_value = template_state.get(base_key, '')
+              base_index = base_options.index(base_value) if base_value in base_options else 0
+              func_key = f'transform_{name}_function_{i+1}'
+              func_value = template_state.get(func_key, '')
+              new_key = f'transform_{name}_new_{i+1}'
+              new_value = template_state.get(new_key, '')
+              other_key = f'transform_{name}_other_{i+1}'
+              other_value = template_state.get(other_key, '')
+              axis_key = f'transform_{name}_axis_{i+1}'
+              axis_options = [None, 'rows', 'columns']
+              axis_value = template_state.get(axis_key, '')
+              axis_index = axis_options.index(axis_value) if axis_value in axis_options else 0
+              if 'pandas' in name:
                 if name == 'pandas':
-                  base = st.selectbox('Base', df.columns, key=f'{name}_base_{i+1}')
-                elif name == 'post_pandas':
-                  base = st.text_input('Base', key=f'{name}_base_{i+1}')
+                  base = st.selectbox('Base', base_options, key=base_key, index=base_index)
+                else:
+                  base = st.text_input('Base', key=base_key, value=base_value)
                 transform_kwargs = {
-                  'func': st.text_input('Function', key=f'{name}_function_{i+1}'),
+                  'func': st.text_input('Function', key=func_key, value=func_value),
                   'base': base,
-                  'new': st.text_input('New', key=f'{name}_new_{i+1}'),
-                  'axis': st.selectbox('Axis', [None, 'rows', 'columns'], key=f'{name}_axis_{i+1}'),
-                  'other': st.text_input('Other', key=f'{name}_other_{i+1}')}
+                  'new': st.text_input('New', key=new_key, value=new_value),
+                  'axis': st.selectbox('Axis', axis_options, key=axis_key, index=axis_index),
+                  'other': st.text_input('Other', key=other_key, value=other_value)}
               elif name == 'scale':
+                init_key = f'transform_{name}_initial_{i+1}'
+                init_value = template_state.get(init_key, '')
+                coef_key = f'transform_{name}_coefficient_{i+1}'
+                coef_value = template_state.get(coef_key, '')
                 transform_kwargs = {
-                  'base': st.text_input('Base', key=f'{name}_base_{i+1}'),
-                  'new': st.text_input('New', key=f'{name}_new_{i+1}'),
-                  'initial': st.text_input('Initial', key=f'{name}_initial_{i+1}'),
-                  'coefficient': st.text_input('Coefficient', key=f'{name}_coefficient_{i+1}')}
+                  # 'base': st.text_input('Base', key=base_key, value=base_value),
+                  'base': st.selectbox('Base', base_options, key=base_key, index=base_index),
+                  'new': st.text_input('New', key=new_key, value=new_value),
+                  'initial': st.text_input('Initial', key=init_key, value=init_value),
+                  'coefficient': st.text_input('Coefficient', key=coef_key, value=coef_value)}
               elif name == 'filter':
+                filter_options = ['ge', 'eq', 'lt', 'le', 'ne']
+                filter_index = filter_options.index(func_value) if func_value in filter_options else 0
                 transform_kwargs = {
-                  'func': st.selectbox('Function', ['ge', 'eq', 'lt', 'le', 'ne'], key=f'{name}_function_{i+1}'),
-                  'base': st.selectbox('Base', df.columns, key=f'{name}_base_{i+1}'),
-                  'other': st.text_input('Other', key=f'{name}_other_{i+1}')}
+                  'func': st.selectbox('Function', filter_options, key=func_key, index=filter_index),
+                  'base': st.selectbox('Base', base_options, key=base_key, index=base_index),
+                  'other': st.text_input('Other', key=other_key, value=other_value)}
               else:
-                raise NotImplemetedError(name)
+                raise NotImplementedError(name)
               transform_kwargs = {k: v for k, v in transform_kwargs.items() 
                                   if v is not None and v != ''}
               for k, v in transform_kwargs.items():
@@ -243,7 +326,7 @@ def main(**kwargs):
                 transform_function = globals()[transform_name]
                 new_dfs = transform_function(df2, **transform_kwargs)
                 df2 = pd.concat([df2] + new_dfs, axis=1)
-              elif transform_name in ['pandas', 'post_pandas']:
+              elif 'pandas' in transform_name:
                 base = transform_kwargs.pop('base')
                 new = transform_kwargs.pop('new')
                 if 'other' in transform_kwargs:
@@ -256,24 +339,21 @@ def main(**kwargs):
                 mask = getattr(df2[base], func)(**transform_kwargs)
                 df2 = df2[mask]
               else:
-                raise NotImplemetedError(name)
+                raise NotImplementedError(name)
             st.session_state['df2'] = df2
             st.success(f'OK, ROWS: {n_rows}->{len(df2)}, COLS: {n_cols}->{len(df2.columns)}')
-      if df2 is not None:
-        df4 = df2
-      else:
-        df4 = df
-      with st.expander('Table options'):
-        with st.form(key='table_params'):
+      df4 = df2 if df2 is not None else df
+      with st.expander('Table'):
+        with st.form(key='table_form'):
           table_button = st.form_submit_button(label='Plot')
           if table_button:
             tab_table.dataframe(df4)
             st.success('OK')
-      with st.expander('Scatter options'):
+      with st.expander('Scatter'):
         is_color = st.checkbox('Add color', value=True)
         is_symbol = st.checkbox('Add symbol', value=False)
         is_size = st.checkbox('Add size', value=False)
-        with st.form(key='scatter_params'):
+        with st.form(key='scatter_form'):
           x_col = st.selectbox(f'X', df4.columns)
           y_col = st.selectbox(f'Y', df4.columns)
           color_col = st.selectbox(f'Color', df4.columns) if is_color else None
@@ -305,48 +385,94 @@ def main(**kwargs):
         if fig_scatter is not None:
           st.download_button(label='Download', data=fig_scatter, 
                              file_name='scatter.html', mime='text/html')
-      with st.expander('Contour options'):
-        contour_type = st.selectbox('Type', ['levels', 'constraint'])
-        is_contour_labels = st.checkbox('Show labels', value=True)
-        is_contour_lines = st.checkbox('Show lines', value=True)
-        is_contour_mid = st.checkbox('Set mid', value=False)
-        html_bytes = None
-        with st.form(key='contour_params'):
-          x_col = st.selectbox(f'X', df4.columns)
-          y_col = st.selectbox(f'Y', df4.columns)
-          z_col = st.selectbox(f'Z', df4.columns)
-          contour_coloring = st.selectbox('Coloring', ['fill', 'heatmap', 'lines', 'none'])
-          contour_smoothing = st.number_input('Smoothing', min_value=0., max_value=1.3, value=1.)
+      with st.expander('Contour'):
+        contour_type = init_template(template_state, st.selectbox, label=f'Type',
+                                     key=f'contour_type', options=['levels', 'constraint'])
+        is_contour_labels = init_template(template_state, st.checkbox, 
+                                          label='Show labels', default=True,
+                                          key='contour_is_contour_labels')
+        is_contour_lines = init_template(template_state, st.checkbox, 
+                                         label='Show line', default=True,
+                                         key='contour_is_contour_lines')
+        is_contour_mid = init_template(template_state, st.checkbox, 
+                                       label='Set mid', default=False,
+                                       key='contour_is_contour_mid')
+        with st.form(key='contour_form'):
+          x_col = init_template(template_state, st.selectbox, label=f'X',
+                                key=f'contour_col_x', options=list(df4.columns))
+          y_col = init_template(template_state, st.selectbox, label=f'Y',
+                                key=f'contour_col_y', options=list(df4.columns))
+          z_col = init_template(template_state, st.selectbox, label=f'Z',
+                                key=f'contour_col_z', options=list(df4.columns))
+          contour_coloring = init_template(template_state, st.selectbox, 
+                                           label=f'Coloring', key=f'contour_coloring', 
+                                           options=['fill', 'heatmap', 'lines', 'none']) 
+          contour_smoothing = init_template(template_state, st.number_input, 
+                                            label=f'Smoothing', key=f'contour_smoothing', 
+                                            min_value=0., max_value=1.3, default=1.) 
           if contour_type == 'levels':
-            contour_start = st.number_input('Start')
-            contour_end = st.number_input('End')
-            contour_size = st.number_input('Size')
+            contour_start = init_template(template_state, st.number_input, 
+                                          label=f'Start', key=f'contour_start')
+            contour_end = init_template(template_state, st.number_input, 
+                                        label=f'End', key=f'contour_end')
+            contour_size = init_template(template_state, st.number_input, 
+                                         label=f'Size', key=f'contour_size')
             contour_value_0, contour_value_1, contour_operation = None, None, None
           else:  # constraint
-            contour_operation = st.selectbox(
-              'Operation', ['=', '<', '>=', '>', '<=', '[]', '()', '[)', '(]', '][', ')(', '](', ')['])
-            contour_value_0 = st.number_input('Value 0')
-            contour_value_1 = st.number_input('Value 1')
+            contour_operation = init_template(
+              template_state, st.selectbox, label=f'Operation', 
+              key=f'contour_operation', 
+              options=['=', '<', '>=', '>', '<=', 
+                       '[]', '()', '[)', '(]', '][', ')(', '](', ')['])
+            contour_value_0 = init_template(template_state, st.number_input, 
+                                            label=f'Value 0', key=f'contour_value_0')
+            contour_value_1 = init_template(template_state, st.number_input, 
+                                            label=f'Value 1', key=f'contour_value_1')
             contour_start, contour_end, contour_size = None, None, None
           if is_contour_labels:
-            contour_label_size = st.number_input(
-              'Label Size', min_value=0, max_value=None, value=12, step=1)
-            contour_label_color = st.selectbox(
-              'Label Color', ['white', 'black', 'red', 'green', 'blue', 'yellow', 'cyan', 'magenta'])
-            contour_label_format = st.text_input(
-              'Label Format', value='.0f', help='See https://github.com/d3/d3-format/tree/v1.4.5#d3-format')
-          contour_interp = st.selectbox('Interpolation', ['linear', 'nearest', 'cubic'])
-          contour_min_x = st.number_input('Min X')
-          contour_max_x = st.number_input('Max X')
-          contour_num_x = st.number_input('Num X', min_value=2, value=11)
-          contour_min_y = st.number_input('Min Y')
-          contour_max_y = st.number_input('Max Y')
-          contour_num_y = st.number_input('Num Y', min_value=2, value=11)
-          contour_min_z = st.number_input('Min Z')
-          contour_max_z = st.number_input('Max Z')
-          contour_mid_z = st.number_input('Mid Z') if is_contour_mid else None
-          countour_button = st.form_submit_button(label='Plot')
-          if countour_button:
+            contour_label_size = init_template(template_state, st.number_input, 
+                                               label=f'Label Size', 
+                                               key=f'contour_label_size',
+                                               min_value=0, max_value=None, step=1,
+                                               default=12)
+            contour_label_color = init_template(
+              template_state, st.selectbox, label=f'Label Color',
+              key=f'contour_label_color', 
+              options=['white', 'black', 'red', 'green', 
+                       'blue', 'yellow', 'cyan', 'magenta'])
+            contour_label_format = init_template(
+              template_state, st.text_input, label='Label Format', 
+              key='layout_label_format', default='.0f',
+              help='See https://github.com/d3/d3-format/tree/v1.4.5#d3-format')
+          contour_interp = init_template(
+              template_state, st.selectbox, label=f'Interpolation',
+              key=f'contour_interpolation', 
+              options=['linear', 'nearest', 'cubic'])
+          contour_min_x = init_template(template_state, st.number_input, 
+                                        label=f'Min X', key=f'contour_min_x')
+          contour_max_x = init_template(template_state, st.number_input, 
+                                        label=f'Max X', key=f'contour_max_x')
+          contour_num_x = init_template(template_state, st.number_input, 
+                                        label=f'Num X', key=f'contour_num_x',
+                                        min_value=2, step=1, default=11)
+          contour_min_y = init_template(template_state, st.number_input, 
+                                        label=f'Min Y', key=f'contour_min_y')
+          contour_max_y = init_template(template_state, st.number_input, 
+                                        label=f'Max Y', key=f'contour_max_y')
+          contour_num_y = init_template(template_state, st.number_input, 
+                                        label=f'Num Y', key=f'contour_num_y',
+                                        min_value=2, step=1, default=11)
+          contour_min_z = init_template(template_state, st.number_input, 
+                                        label=f'Min Z', key=f'contour_min_z')
+          contour_max_z = init_template(template_state, st.number_input, 
+                                        label=f'Max Z', key=f'contour_max_z')
+          if is_contour_mid:
+            init_template(template_state, st.number_input, 
+                          label=f'Mid Z', key=f'contour_mid_z')
+          else:
+            contour_mid_z = None
+          contour_button = st.form_submit_button(label='Plot')
+          if contour_button:
             df4 = df4[[x_col, y_col, z_col]].dropna()
             xs = df4[x_col].to_numpy(copy=True)
             ys = df4[y_col].to_numpy(copy=True)
@@ -419,8 +545,8 @@ def main(**kwargs):
         if fig_contour is not None:
           st.download_button(label='Download', data=fig_contour, 
                              file_name='contour.html', mime='text/html')
-      with st.expander('Correlation options'):
-        with st.form(key='correlation_params'):
+      with st.expander('Correlation'):
+        with st.form(key='correlation_form'):
           methods = ['pearson', 'kendall', 'spearman']
           method = st.selectbox(f'Method', methods, index=0)
           cell_size = st.number_input('Cell size', min_value=0, max_value=None, value=30, step=1)
@@ -473,113 +599,6 @@ def main(**kwargs):
         if fig_corr is not None:
           st.download_button(label='Download', data=fig_corr, 
                              file_name='corr.html', mime='text/html')  
-      # with st.expander('Contour options'):
-      #   contour_type = st.selectbox('Type', ['levels', 'constraint'])
-        # is_contour_labels = st.checkbox('Show labels', value=True)
-        # is_contour_lines = st.checkbox('Show lines', value=True)
-        # is_contour_mid = st.checkbox('Set mid', value=False)
-        # with st.form(key='contour_params'):
-        #   x_col = st.selectbox(f'X', df4.columns)
-        #   y_col = st.selectbox(f'Y', df4.columns)
-        #   z_col = st.selectbox(f'Z', df4.columns)
-        #   contour_coloring = st.selectbox('Coloring', ['fill', 'heatmap', 'lines', 'none'])
-        #   contour_smoothing = st.number_input('Smoothing', min_value=0., max_value=1.3, value=1.)
-        #   if contour_type == 'levels':
-        #     contour_start = st.number_input('Start')
-        #     contour_end = st.number_input('End')
-        #     contour_size = st.number_input('Size')
-        #     contour_value_0, contour_value_1, contour_operation = None, None, None
-        #   else:  # constraint
-        #     contour_operation = st.selectbox(
-        #       'Operation', ['=', '<', '>=', '>', '<=', '[]', '()', '[)', '(]', '][', ')(', '](', ')['])
-        #     contour_value_0 = st.number_input('Value 0')
-        #     contour_value_1 = st.number_input('Value 1')
-        #     contour_start, contour_end, contour_size = None, None, None
-        #   if is_contour_labels:
-        #     contour_label_size = st.number_input(
-        #       'Label Size', min_value=0, max_value=None, value=12, step=1)
-        #     contour_label_color = st.selectbox(
-        #       'Label Color', ['white', 'black', 'red', 'green', 'blue', 'yellow', 'cyan', 'magenta'])
-        #     contour_label_format = st.text_input(
-        #       'Label Format', value='.0f', help='See https://github.com/d3/d3-format/tree/v1.4.5#d3-format')
-        #   contour_interp = st.selectbox('Interpolation', ['linear', 'nearest', 'cubic'])
-        #   contour_min_x = st.number_input('Min X')
-        #   contour_max_x = st.number_input('Max X')
-        #   contour_num_x = st.number_input('Num X', min_value=2, value=11)
-        #   contour_min_y = st.number_input('Min Y')
-        #   contour_max_y = st.number_input('Max Y')
-        #   contour_num_y = st.number_input('Num Y', min_value=2, value=11)
-        #   contour_min_z = st.number_input('Min Z')
-        #   contour_max_z = st.number_input('Max Z')
-        #   contour_mid_z = st.number_input('Mid Z') if is_contour_mid else None
-        #   countour_button = st.form_submit_button(label='Plot')
-        #   if countour_button:
-        #     df4 = df4[[x_col, y_col, z_col]].dropna()
-        #     xs = df4[x_col].to_numpy(copy=True)
-        #     ys = df4[y_col].to_numpy(copy=True)
-        #     zs = df4[z_col].to_numpy(copy=True)
-        #     if contour_min_x == contour_max_x == 0:
-        #       contour_min_x, contour_max_x = np.nanmin(xs), np.nanmax(xs)
-        #     if contour_min_y == contour_max_y == 0:
-        #       contour_min_y, contour_max_y = np.nanmin(ys), np.nanmax(ys)
-        #     xr = np.linspace(contour_min_x, contour_max_x, contour_num_x)
-        #     yr = np.linspace(contour_min_y, contour_max_y, contour_num_y)
-        #     xr, yr = np.meshgrid(xr, yr)
-        #     Z = griddata((xs, ys), zs, (xr, yr), method=contour_interp)
-        #     contours = {'type': contour_type, 
-        #                 'operation': contour_operation,
-        #                 'coloring': contour_coloring}
-        #     if contour_type == 'levels':
-        #       if contour_start == contour_end == 0:
-        #         contours['start'] = np.nanmin(Z)
-        #         contours['end'] = np.nanmax(Z)
-        #         if contour_size == 0:
-        #           contours['size'] = (np.nanmax(Z) - np.nanmin(Z)) / 10
-        #         else:
-        #           contours['size'] = contour_size
-        #       else:
-        #         contours['start'] = contour_start
-        #         contours['end'] = contour_end
-        #         contours['size'] = contour_size
-        #     else:
-        #       if contour_operation in ['=', '<', '>=', '>', '<=']:
-        #         contours['value'] = contour_value_0
-        #       else:
-        #         contours['value'] = [contour_value_0, contour_value_1]   
-        #     if is_contour_labels:
-        #       contours.update({      
-        #         'showlabels': is_contour_labels,
-        #         'labelformat': contour_label_format,
-        #         'labelfont': {
-        #           'size': contour_label_size,
-        #           'color': contour_label_color}})
-        #     contours['showlines'] = is_contour_lines
-        #     contour_kwargs = {
-        #       'x': xr[0], 'y': yr[:, 0], 'z': Z, 
-        #       'line_smoothing': contour_smoothing,
-        #       'colorscale': continuous_color,
-        #       'contours': contours
-        #     }
-        #     try:
-        #       contour_kwargs['colorbar'] = {'title': layout['coloraxis']['colorbar']['title']['text']}
-        #     except Exception as e:
-        #       contour_kwargs['colorbar'] = {'title': z_col}
-        #     if contour_mid_z is not None:
-        #       contour_kwargs['zmid'] = contour_mid_z
-        #     if contour_min_z == contour_max_z == 0:
-        #       contour_kwargs['zauto'] = True
-        #     else:
-        #       contour_kwargs['zauto'] = False
-        #       contour_kwargs['zmin'] = contour_min_z
-        #       contour_kwargs['zmax'] = contour_max_z
-        #     # print(contour_kwargs)
-
-      #             fig = go.Figure(data=go.Contour(**contour_kwargs))
-      #             layout.setdefault('xaxis', {}).setdefault('title', {}).setdefault('text', x_col)
-      #             layout.setdefault('yaxis', {}).setdefault('title', {}).setdefault('text', y_col)
-      #             fig.update_layout(**layout)
-      #             tab_contour.plotly_chart(fig, use_container_width=False, sharing="streamlit", theme=None)
-      #             st.success('OK')
 
             
 def load_study(url, study_name):
@@ -594,6 +613,36 @@ def convert_df(df):
    return df.to_csv(index=False).encode('utf-8')
 
 
+def init_template(template_state, widget, key, options=None, default=None, **kwargs):
+  """Wrapper of streamlit widget for initialization from template state
+  """
+  if key in template_state:
+    value = template_state[key]
+  elif default is not None:
+    value = default
+  else:
+    value = None
+  if options is not None and value in options:
+    index = options.index(value)
+  else:
+    index = 0
+  if widget == st.checkbox:
+    return widget(key=key, value=value, **kwargs)
+  elif widget == st.text_input:
+    return widget(key=key, value=value, **kwargs)
+  elif widget == st.number_input:
+    if value is not None:
+      return widget(key=key, value=value, **kwargs)
+    else:
+      return widget(key=key, **kwargs)
+  elif widget == st.selectbox:
+    return widget(options=options, key=key, index=index, **kwargs)
+  elif widget == st.multiselect:
+    return widget(key=key, default=value, **kwargs)
+  else:
+    raise NotImplementedError(widget)
+  
+  
 def scale(df, base, new, initial, coefficient):
   coefficient = df[coefficient] if isinstance(coefficient, str) else coefficient
   initial = df[initial] if isinstance(initial, str) else initial
@@ -601,161 +650,7 @@ def scale(df, base, new, initial, coefficient):
   new_df = coefficient*(base - initial) + initial
   new_df.name = new
   return [new_df]
-  
-  
-def contours(df):
-  fig = go.Figure(data=go.Contour(**contour_kwargs))
-  layout.setdefault('xaxis', {}).setdefault('title', {}).setdefault('text', x_col)
-  layout.setdefault('yaxis', {}).setdefault('title', {}).setdefault('text', y_col)
-  fig.update_layout(**layout)
-  tab_contour.plotly_chart(fig, use_container_width=False, sharing="streamlit", theme=None)
-  st.success('OK')
-  # def nb_dx(input_file):
-  # pd.set_option('display.max_columns', None)
-  # p = Path(input_file)
-  # df = preprocess(input_file)
-  # print(len(df))
-  # df = df[df['state'] == "COMPLETE"]
-  # print(len(df))
-  # df = df[df['concept'] == 'borehole']
-  # df = df[df['size.rock'] == 10]
-  # df = df[df['nb'] < 10]
-  # df = df[df['dx'] < 100]
-  # # print(len(df))
-  # cols = ['q.limit', 'q.limit.container', 't.max',
-  #         't.ebs.max', 't.castiron.max', 't.rock.max', 't.fill.max', 't.hill.max']
-  # # Quality weighted
-  # groups = df.groupby(['dz.rock', 'dr', 'dh', 'dx', 'nb'], as_index=False)
-  # a2f = {x: 'last' for x in df}
-  # for c in cols:
-  #   a2f[c] = lambda x: np.average(x, weights=df.loc[x.index, "quality"])
-  #   # a2f[c] = 'max'
-  # df2 = groups.agg(a2f)
-  # df = df2
-  # # Extrapolate
-  # order = 1
-  # weights = [1, 1, 1, 1, 1]
-  # cols_id = ['dx', 'nb', 'dr', 'dz.rock', 'dh']
-  # polys = {x: {y: np.poly1d(np.polyfit(df[x], df[y], order)) for y in cols} for x in cols_id}
-  # dfs = [df]
-  # for ids in product([10, 15, 20, 30, 50], [2, 5, 10], [0.5, 1], [50], [1, 2]):
-  #   r = df[np.logical_and.reduce([df[x] == y for x, y in zip(cols_id, ids)])]
-  #   if len(r) == 0:
-  #     row = {x: y for x, y in zip(cols_id, ids)}
-  #     for c in cols:
-  #       values = []
-  #       for k, v in zip(cols_id, ids):
-  #         mask = np.logical_and.reduce([df[x] == y for x, y in zip(cols_id, ids) if x != k])
-  #         if len(df[mask]) > 1:
-  #           vv = np.poly1d(np.polyfit(df[mask][k], df[mask][c], order))(v)
-  #         else:
-  #           vv = polys[k][c](v)
-  #         values.append(vv)
-  #       row[c] = np.average(values, weights=weights)
-  #     dfs.append(pd.DataFrame([row]))
-  # df = pd.concat(dfs, ignore_index=True)
-  # df2 = df
-  # # cnt = 0
-  # # cols = ['dz.rock', 'dr', 'dh', 'dx', 'nb']
-  # # for name, g in df.groupby(cols, as_index=False):
-  # #   cnt += 1
-  # #   print(name, len(g))
-  # #   fig = px.scatter(g,
-  # #                    x="quality",
-  # #                    y='t.max',
-  # #                    # color='zone',
-  # #                    # facet_col='zone',
-  # #                    # facet_col_wrap=1,
-  # #                    log_x=True, 
-  # #                    # trendline="ols", trendline_options=dict(log_x=True),
-  # #                    trendline="lowess",
-  # #                    # trendline="ols",     
-  # #                    # trendline_options=dict(log_x=True),
-  # #                    trendline_options=dict(frac=0.67),
-  # #                    # trendline_color_override='white',
-  # #                    template='plotly_dark',
-  # #                    )
-  # #   mask = np.logical_and.reduce([df2[x] == y for x, y in zip(cols, name)])
-  # #   wa = df2[mask]
-  # #   fig.add_hline(y=wa['t.max'].item(), line_width=1, line_dash="dash", line_color="white")
-  # #   fig.write_image(f'group_{name}.png')
-  # #   fig.write_html(f'group_{name}.html')
-  # #   if cnt == 100:
-  # #     break
-  # # print(df2.head(5))
-  # groups = df2.groupby(['dz.rock', 'dr', 'dh'], as_index=False)
-  # n_levels = 50
-  # num = 100
-  # ms = 1
-  # for name, g in groups:
-  #   dz, dr, dh = name
-  #   print(name, len(g))
-  #   # # EBS
-  #   # tri_by_xyz(p, g, 
-  #   #            x='dx', y='nb', z='t.ebs.max', 
-  #   #            x_label='Расстояние между скважинами, м', 
-  #   #            y_label='Контейнеров на скважину, шт', 
-  #   #            title= (f'Температура в ИББ при тепловыделении 1000 Вт/м3'
-  #   #                    f'\nРасстояние между контейнерами {dh} м'
-  #   #                    f'\nТолщина ИББ {dr} м' 
-  #   #                    f'\nГлубина {dz} м'),
-  #   #            cb_label='Температура, °C', suffix=f'ebs_max_{name}',
-  #   #            colormap='jet', n_levels=n_levels, num=num, ms=ms)
-  #   # # Rock
-  #   # tri_by_xyz(p, g, x='dx', y='nb', z='t.rock.max', 
-  #   #            x_label='Расстояние между скважинами, м', 
-  #   #            y_label='Контейнеров на скважину, шт', 
-  #   #            title= (f'Температура в среде при тепловыделении 1000 Вт/м3'
-  #   #                    f'\nРасстояние между контейнерами {dh} м'
-  #   #                    f'\nТолщина ИББ {dr} м' 
-  #   #                    f'\nГлубина {dz} м'),
-  #   #            cb_label='Температура, °C', suffix=f'rock_max_{name}',
-  #   #            colormap='jet', n_levels=n_levels, num=num, ms=ms)
-  #   # # EBS < 150
-  #   # for k in [0.3, 0.4, 0.5, 0.6, 0.7, 1.0, 1.5]:
-  #   #   t0 = 9.0
-  #   #   c = 't.ebs.max'
-  #   #   tlim = 150
-  #   #   df2['dt'] = tlim - (k*(df2[c] - t0) + t0)
-  #   #   tri_by_xyz_zero(p, g, x='dx', y='nb', z='dt', 
-  #   #                   x_label='Расстояние между скважинами, м',
-  #   #                   y_label='Контейнеров на скважину, шт', 
-  #   #                   title= (f'Критерий 150°C в ИББ при тепловыделении {k*1000:.0f} Вт/м3'
-  #   #                           f'\nРасстояние между контейнерами {dh} м'
-  #   #                           f'\nТолщина ИББ {dr} м' 
-  #   #                           f'\nГлубина {dz} м'),
-  #   #                   cb_label='Запас по температуре, °C', suffix=f'ebs_{name}_{k}',
-  #   #                   colormap='RdBu', n_levels=n_levels, num=num, linewidth=1, ms=ms)
-  #   # # Rock < 100
-  #   # for k in [0.3, 0.4, 0.5, 0.6, 0.7, 1.0, 1.5]:
-  #   #   c = 't.rock.max'
-  #   #   t0 = 9.0
-  #   #   tlim = 100
-  #   #   df2['dt'] = tlim - (k*(df2[c] - t0) + t0)
-  #   #   tri_by_xyz_zero(p, g, x='dx', y='nb', z='dt', 
-  #   #                   x_label='Расстояние между скважинами, м', 
-  #   #                   y_label='Контейнеров на скважину, шт', 
-  #   #                   title= (f'Критерий 100°C в среде при тепловыделении {k*1000:.0f} Вт/м3'
-  #   #                           f'\nРасстояние между контейнерами {dh} м'
-  #   #                           f'\nТолщина ИББ {dr} м' 
-  #   #                           f'\nГлубина {dz} м'),
-  #   #                   cb_label='Запас по температуре, °C', suffix=f'rock_{name}_{k}',
-  #   #                   colormap='RdBu', n_levels=n_levels, num=num, linewidth=1, ms=ms)
-  #   # All
-  #   t0 = 9.0
-  #   for k in [0.3, 0.4, 0.5, 0.6, 0.7, 1.0, 1.5]:
-  #     g['Порода < 100°C'] = 100 - (k*(g['t.rock.max'] - t0) + t0)
-  #     g['ИББ < 150°C'] = 150 - (k*(g['t.ebs.max'] - t0) + t0)
-  #     contours_zero(p, g, x='dx', y='nb', z=['Порода < 100°C', 'ИББ < 150°C'], 
-  #                   suffix=f'{name}_{k}', 
-  #                   x_label='Расстояние между скважинами, м', 
-  #                   y_label='Контейнеров на скважину, шт', 
-  #                   title= (f'Критерии при тепловыделении {k*1000:.0f} Вт/м3'
-  #                           f'\nРасстояние между контейнерами {dh} м'
-  #                           f'\nТолщина ИББ {dr} м' 
-  #                            f'\nГлубина {dz} м'),
-  #                   colormap='RdBu', n_levels=n_levels, num=num, linewidth=1, ms=ms)
-  
+
 
 if __name__ == '__main__':
   c = None
