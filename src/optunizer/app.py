@@ -137,7 +137,17 @@ def main(**kwargs):
                  "Roboto", "Roboto Mono"])
       font_size = init_template(template_state, st.number_input, label='Font size', 
                                 key='layout_font_size', default=12, min_value=0, step=1)
-      layout = {'template': template, 'font_family': font_family, 'font_size': font_size}
+      is_autosize = init_template(template_state, st.checkbox, label='Autosize', 
+                                  key='layout_autosize', default=True)
+      height = init_template(template_state, st.number_input, 
+                             label=f'Height', key=f'layout_height', default=400,
+                             min_value=0, max_value=None, step=1)
+      width = init_template(template_state, st.number_input, 
+                            label=f'Width', key=f'layout_width', default=800,
+                            min_value=0, max_value=None, step=1)
+      # margin=dict(l=10, r=10, t=10, b=10)
+      layout = {'template': template, 'font_family': font_family, 'font_size': font_size, 
+                'autosize': is_autosize, 'height': height, 'width': width}
       if is_x_log:  
         layout.setdefault('xaxis', {}).setdefault('type', 'log')
       if is_y_log:  
@@ -164,9 +174,15 @@ def main(**kwargs):
       fenia_type = st.selectbox('Type', ['time_zones'])
       with st.form(key='fenia_form'):
         fenia_files = st.file_uploader("Files", accept_multiple_files=True)
-        fenia_k = st.number_input(f'Coefficient', value=1.0)
-        fenia_vol = st.number_input(f'Volume', value=0.0)
-        fenia_init_t = st.number_input(f'Initial temperature', value=9.0)
+        fenia_k = init_template(template_state, st.number_input, 
+                                label=f'Coefficient', key=f'fenia_coefficient', 
+                                default=1.0)
+        fenia_vol = init_template(template_state, st.number_input, 
+                                  label=f'Volume', key=f'fenia_volume', 
+                                  default=0.0)
+        fenia_init_t = init_template(template_state, st.number_input, 
+                                     label=f'Initial Temperature', key=f'fenia_initial_temperature', 
+                                     default=9.0)
         fenia_button = st.form_submit_button(label='Plot')
         if fenia_button:
           if fenia_type == 'time_zones':
@@ -228,7 +244,10 @@ def main(**kwargs):
               k_vol = 1
             k_all = k_vol*fenia_k
             for zone in zone_names:
-              df_fenia[zone] = k_all*(df_fenia[zone] - fenia_init_t) + fenia_init_t
+              if zone != 'Environment':
+                df_fenia[zone] = k_all*(df_fenia[zone] - fenia_init_t) + fenia_init_t
+              else:
+                df_fenia[zone] = k_vol*0.92556*(df_fenia[zone] - fenia_init_t) + fenia_init_t
             print(df_fenia)
             eng2rus = {'Filling': 'РАО', 
                        'Plate': 'Перегородки', 
@@ -440,6 +459,16 @@ def main(**kwargs):
               key=f'contour_label_color', 
               options=['white', 'black', 'red', 'green', 
                        'blue', 'yellow', 'cyan', 'magenta'])
+            contour_line_color = init_template(
+              template_state, st.selectbox, label=f'Line Color',
+              key=f'contour_line_color', 
+              options=['white', 'black', 'red', 'green', 
+                       'blue', 'yellow', 'cyan', 'magenta'])
+            contour_line_width = init_template(template_state, st.number_input, 
+                                               label=f'Line Width', 
+                                               key=f'contour_line_width',
+                                               min_value=0., max_value=None,
+                                               default=0.5)
             contour_label_format = init_template(
               template_state, st.text_input, label='Label Format', 
               key='layout_label_format', default='.0f',
@@ -516,6 +545,9 @@ def main(**kwargs):
             contour_kwargs = {
               'x': xr[0], 'y': yr[:, 0], 'z': Z, 
               'line_smoothing': contour_smoothing,
+              'line': {
+                  'color': contour_line_color,
+                  'width': contour_line_width},
               'colorscale': continuous_color,
               'contours': contours
             }
