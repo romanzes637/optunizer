@@ -270,7 +270,7 @@ def main(**kwargs):
   if df is not None:
     with st.sidebar:
       with st.expander('Transform'):
-        transforms_names = ['pandas', 'post_pandas', 'scale', 'post_post_pandas', 'filter']
+        transforms_names = ['pandas', 'post_pandas', 'scale', 'post_post_pandas', 'filter', 'slice']
         transform_numbers = {}
         for t in transforms_names:
           transform_numbers[t] = init_template(template_state, st.number_input, 
@@ -318,6 +318,26 @@ def main(**kwargs):
                   'new': st.text_input('New', key=new_key, value=new_value),
                   'initial': st.text_input('Initial', key=init_key, value=init_value),
                   'coefficient': st.text_input('Coefficient', key=coef_key, value=coef_value)}
+              elif name == 'slice':
+                start_key = f'transform_{name}_start_{i+1}'
+                start_value = template_state.get(start_key, '')
+                stop_key = f'transform_{name}_stop_{i+1}'
+                stop_value = template_state.get(stop_key, '')
+                step_key = f'transform_{name}_step_{i+1}'
+                step_value = template_state.get(step_key, '')
+                start_new = st.text_input('Start', key=start_key, value=start_value)
+                stop_new = st.text_input('Stop', key=stop_key, value=stop_value)
+                step_new = st.text_input('Step', key=step_key, value=step_value)
+                start_new = int(start_new) if start_new else None
+                stop_new = int(stop_new) if stop_new else None
+                step_new = int(step_new) if step_new else None
+                transform_kwargs = {
+                  # 'base': st.text_input('Base', key=base_key, value=base_value),
+                  'base': st.selectbox('Base', base_options, key=base_key, index=base_index),
+                  'new': st.text_input('New', key=new_key, value=new_value),
+                  'start': start_new,
+                  'stop': stop_new,
+                  'step': step_new}
               elif name == 'filter':
                 filter_options = ['ge', 'eq', 'lt', 'le', 'ne']
                 filter_index = filter_options.index(func_value) if func_value in filter_options else 0
@@ -330,10 +350,11 @@ def main(**kwargs):
               transform_kwargs = {k: v for k, v in transform_kwargs.items() 
                                   if v is not None and v != ''}
               for k, v in transform_kwargs.items():
-                try:
-                  transform_kwargs[k] = float(v)
-                except:
-                  pass
+                if isinstance(transform_kwargs[k], str):
+                  try:
+                    transform_kwargs[k] = float(v)
+                  except:
+                    pass
               transforms.append([name, transform_kwargs])
           transform_button = st.form_submit_button(label='Transform')
           if transform_button:
@@ -357,6 +378,10 @@ def main(**kwargs):
                 base = transform_kwargs.pop('base')
                 mask = getattr(df2[base], func)(**transform_kwargs)
                 df2 = df2[mask]
+              elif transform_name == 'slice':
+                base = transform_kwargs.pop('base')
+                new = transform_kwargs.pop('new')
+                df2[new] = df2[base].str.slice(**transform_kwargs)
               else:
                 raise NotImplementedError(name)
             st.session_state['df2'] = df2
