@@ -19,7 +19,7 @@ import platform
 
 import yaml
 import optuna
-
+import sqlalchemy
 
 class Optimizer:
   def __init__(
@@ -29,7 +29,7 @@ class Optimizer:
     sampler=None, sampler_kwargs=None, pruner=None, pruner_kwargs=None,
     subprocess_kwargs=None, stdout_kwargs=None, stderr_kwargs=None,
     params=None, objectives=None, attrs=None, lsep=None, gsep=None,
-    verbose=False, **kwargs):
+    verbose=False, storage_kwargs=None, **kwargs):
     self.url = url
     self.study = study
     self.trials = trials
@@ -58,6 +58,7 @@ class Optimizer:
     self.lsep = '/' if lsep is None else lsep
     self.gsep = '@' if gsep is None else gsep
     self.verbose = verbose
+    self.storage_kwargs = storage_kwargs
 
   @staticmethod
   def initialize_sampler(sampler, sampler_kwargs):
@@ -110,6 +111,21 @@ class Optimizer:
         filtered_kwargs = {k: v for k, v in pruner_kwargs.items() 
                            if k in s.parameters}
         return c(**filtered_kwargs)
+      
+  def initialize_storage(self): 
+    if self.storage_kwargs is not None:
+      storage_kwargs = copy.deepcopy(self.storage_kwargs)
+      storage_kwargs['url'] = self.url
+      if 'engine_kwargs' in storage_kwargs:
+        if 'poolclass' in storage_kwargs['engine_kwargs']:
+          poolclass = storage_kwargs['engine_kwargs']['poolclass']
+          if isinstance(poolclass, str):
+            poolclass = getattr(sqlalchemy.pool, poolclass)
+            storage_kwargs['engine_kwargs']['poolclass'] = poolclass
+      storage = optuna.storages.RDBStorage(**storage_kwargs)
+    else:
+      storage = self.url
+    return storage
   
   @staticmethod
   def suggest(trial, method, method_kwargs):
@@ -355,18 +371,19 @@ class Optimizer:
       return None
 
   def __call__(self):
+    storage = self.initialize_storage()
     if not self.results_only:
       s = self.initialize_sampler(self.sampler, self.sampler_kwargs)
       p = self.initialize_pruner(self.pruner, self.pruner_kwargs)
       directions = list(self.objectives.values())
       if len(directions) == 1:  # single objective
-        study = optuna.create_study(storage=self.url,
+        study = optuna.create_study(storage=storage,
                                     study_name=self.study,
                                     load_if_exists=self.load_if_exists,
                                     sampler=s, pruner=p,
                                     direction=directions[0])
       else:  # multi-objective
-        study = optuna.create_study(storage=self.url,
+        study = optuna.create_study(storage=storage,
                                     study_name=self.study,
                                     load_if_exists=self.load_if_exists,
                                     sampler=s, pruner=p,
@@ -380,7 +397,7 @@ class Optimizer:
       study.optimize(self.objective, n_trials=self.trials, timeout=self.timeout,
                      callbacks=callbacks)
     else:
-      study = optuna.load_study(storage=self.url, study_name=self.study)
+      study = optuna.load_study(storage=storage, study_name=self.study)
     if self.export_csv is not None:
       df = study.trials_dataframe()
       p = Path(self.export_csv)
